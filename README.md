@@ -126,3 +126,8 @@ scripts/                     Build, test, icon and test-server scripts
   files. VLC and IINA play them. `brew install ffmpeg` gives you a single `.mp4`.
 - **With only the Command Line Tools**, the build uses the macOS 26.5 SDK: the macOS 27 SDK needs a
   SwiftUI macro plugin that only ships with Xcode. `scripts/env.sh` handles this automatically.
+
+## License
+
+Copyright (c) 2026 Daniel Bolu. All rights reserved. The app and extension are free to download and
+use; the source code is published for reading and review only. See [LICENSE](LICENSE).
