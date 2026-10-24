@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import SwiftDMCore
+@testable import NidestreamCore
 
 @Suite struct HeaderParsingTests {
     @Test func contentRange() {
@@ -177,7 +177,7 @@ enum CCCryptShim {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         FileManager.default.createFile(atPath: dir.appendingPathComponent("a.zip").path, contents: nil)
-        FileManager.default.createFile(atPath: dir.appendingPathComponent("a (1).zip.sdmpart").path, contents: nil)
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("a (1).zip.nidestream").path, contents: nil)
         #expect(FileUtils.uniqueName("a.zip", in: dir) == "a (2).zip")
         #expect(FileUtils.uniqueName("b.zip", in: dir, taken: ["b.zip"]) == "b (1).zip")
     }

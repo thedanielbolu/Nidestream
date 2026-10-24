@@ -1,14 +1,14 @@
 import Foundation
 import Network
 import Observation
-import SwiftDMCore
+import NidestreamCore
 
 /// Local HTTP endpoint the browser extension talks to. It only listens on 127.0.0.1.
 final class BrowserBridge: @unchecked Sendable {
     static let shared = BrowserBridge()
     static let port: UInt16 = 51515
 
-    private let queue = DispatchQueue(label: "swiftdm.bridge")
+    private let queue = DispatchQueue(label: "nidestream.bridge")
     private var listener: NWListener?
 
     func start() {
@@ -74,7 +74,7 @@ final class BridgeStatus {
             message = "Listening on 127.0.0.1:\(BrowserBridge.port)"
         case .waiting(let error), .failed(let error):
             listening = false
-            message = "Not listening: \(error.localizedDescription). Is another copy of SwiftDM running?"
+            message = "Not listening: \(error.localizedDescription). Is another copy of Nidestream running?"
         case .cancelled:
             listening = false
             message = "Stopped"
@@ -136,7 +136,7 @@ enum BridgeRouter {
 
         switch (request.method, request.path) {
         case ("GET", "/ping"):
-            return .json(["app": "SwiftDM", "version": appVersion], headers: cors)
+            return .json(["app": "Nidestream", "version": appVersion], headers: cors)
         case ("GET", "/config"):
             return .json(["capture": prefs.browserCapture, "extensions": prefs.captureExtensions,
                           "minSizeKB": prefs.minCaptureSizeKB, "version": appVersion], headers: cors)

@@ -2,16 +2,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "SwiftDM",
+    name: "Nidestream",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "SwiftDM", targets: ["SwiftDM"]),
+        .executable(name: "Nidestream", targets: ["Nidestream"]),
     ],
     targets: [
         // Download engine, parsers and protocol helpers. No UI, fully testable.
-        .target(name: "SwiftDMCore"),
+        .target(name: "NidestreamCore"),
         // The macOS app (SwiftUI + AppKit).
-        .executableTarget(name: "SwiftDM", dependencies: ["SwiftDMCore"]),
-        .testTarget(name: "SwiftDMCoreTests", dependencies: ["SwiftDMCore"]),
+        .executableTarget(name: "Nidestream", dependencies: ["NidestreamCore"]),
+        .testTarget(name: "NidestreamCoreTests", dependencies: ["NidestreamCore"]),
     ]
 )

@@ -89,7 +89,7 @@ public struct DownloadRecord: Codable, Sendable, Identifiable, Equatable {
 
     public var fileURL: URL { directory.appendingPathComponent(fileName) }
     public var partURL: URL { directory.appendingPathComponent(fileName + FileUtils.partSuffix) }
-    public var hlsWorkDirectory: URL { directory.appendingPathComponent("." + fileName + ".sdmhls", isDirectory: true) }
+    public var hlsWorkDirectory: URL { directory.appendingPathComponent("." + fileName + ".nidestream-hls", isDirectory: true) }
 
     /// Value for `If-Range` so a resumed download notices when the file changed on the server.
     public var validator: String? {

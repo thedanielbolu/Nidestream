@@ -1,5 +1,5 @@
 import AppKit
-import SwiftDMCore
+import NidestreamCore
 import UserNotifications
 
 /// Offers to download links the user copies, like IDM's clipboard monitoring.
@@ -8,7 +8,7 @@ final class ClipboardMonitor {
     static let shared = ClipboardMonitor()
     private var timer: Timer?
     private var lastChange = NSPasteboard.general.changeCount
-    /// Set when SwiftDM itself writes to the pasteboard ("Copy Address").
+    /// Set when Nidestream itself writes to the pasteboard ("Copy Address").
     var ignoreChangeCount: Int?
 
     func start() {
@@ -150,12 +150,12 @@ enum ExtensionInstaller {
     }
 }
 
-/// `swiftdm://add?url=…&referrer=…&name=…&silent=1` for bookmarklets, scripts and other apps.
+/// `nidestream://add?url=…&referrer=…&name=…&silent=1` for bookmarklets, scripts and other apps.
 /// `silent=1` starts the download without showing the dialog.
 @MainActor
 enum URLSchemeHandler {
     static func handle(_ url: URL) {
-        guard url.scheme?.lowercased() == "swiftdm" else { return }
+        guard url.scheme?.lowercased() == "nidestream" else { return }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
         switch url.host?.lowercased() {

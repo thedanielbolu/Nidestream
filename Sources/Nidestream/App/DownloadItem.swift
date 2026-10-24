@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import SwiftDMCore
+import NidestreamCore
 
 /// Observable wrapper around a persisted record plus live transfer state.
 @MainActor @Observable

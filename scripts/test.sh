@@ -24,4 +24,4 @@ PORT=8799
 python3 scripts/test-server.py "$PORT" "$FILES" &
 SERVER=$!
 sleep 1
-SWIFTDM_TEST_SERVER="http://127.0.0.1:$PORT" swift test "${EXTRA[@]}"
+NIDESTREAM_TEST_SERVER="http://127.0.0.1:$PORT" swift test "${EXTRA[@]}"

@@ -1,6 +1,6 @@
 import AppKit
 import Observation
-import SwiftDMCore
+import NidestreamCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -118,7 +118,7 @@ enum Actions {
         let selected = UIState.shared.selectedItems
         let targets = selected.isEmpty ? manager.items : selected
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "SwiftDM links.txt"
+        panel.nameFieldStringValue = "Nidestream links.txt"
         panel.allowedContentTypes = [.plainText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         try? targets.map(\.record.url.absoluteString).joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)

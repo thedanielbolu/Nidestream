@@ -80,7 +80,7 @@ public struct ProxySettings: Codable, Sendable, Equatable {
 }
 
 public enum FileUtils {
-    public static let partSuffix = ".sdmpart"
+    public static let partSuffix = ".nidestream"
 
     /// Returns `name`, or `name (1)`, `name (2)`… whichever is free in `directory`.
     /// `taken` holds lowercased names already claimed by other downloads.
@@ -162,7 +162,7 @@ public enum RunnerEvent: Sendable {
 }
 
 public enum RunnerResult: Sendable, Equatable {
-    /// `outputs` lists finished files in a work directory; empty means the `.sdmpart` file is the result.
+    /// `outputs` lists finished files in a work directory; empty means the `.nidestream` file is the result.
     case completed(outputs: [URL])
     case stopped
     case failed(String)

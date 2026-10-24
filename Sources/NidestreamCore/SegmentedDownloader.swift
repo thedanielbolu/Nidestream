@@ -83,7 +83,7 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
         self.job = job
         self.limiters = limiters
         self.onEvent = onEvent
-        let queue = DispatchQueue(label: "swiftdm.download", qos: .utility)
+        let queue = DispatchQueue(label: "nidestream.download", qos: .utility)
         let delegateQueue = OperationQueue()
         delegateQueue.maxConcurrentOperationCount = 1
         delegateQueue.underlyingQueue = queue

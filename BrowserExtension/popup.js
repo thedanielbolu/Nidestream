@@ -28,7 +28,7 @@ function nameOf(url) {
 async function render() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const status = await send({ type: "status" });
-  statusLine.textContent = status.online ? "Connected to the app" : "SwiftDM isn't running";
+  statusLine.textContent = status.online ? "Connected to the app" : "Nidestream isn't running";
   statusLine.className = status.online ? "ok" : "bad";
   capture.checked = !!status.captureEnabled;
 

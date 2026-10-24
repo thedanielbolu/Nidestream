@@ -1,6 +1,6 @@
 import AppKit
 import CryptoKit
-import SwiftDMCore
+import NidestreamCore
 import SwiftUI
 
 struct InspectorView: View {

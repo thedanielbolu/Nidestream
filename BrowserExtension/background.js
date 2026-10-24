@@ -1,4 +1,4 @@
-// SwiftDM browser integration: hands downloads, links and detected media to the SwiftDM app,
+// Nidestream browser integration: hands downloads, links and detected media to the Nidestream app,
 // which listens on 127.0.0.1:51515. Runs as a service worker (Chromium) or event page (Firefox).
 
 const APP = "http://127.0.0.1:51515";
@@ -26,7 +26,7 @@ async function call(path, body) {
       ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: controller.signal }
       : { signal: controller.signal };
     const response = await fetch(APP + path, options);
-    if (!response.ok) throw new Error("SwiftDM answered " + response.status);
+    if (!response.ok) throw new Error("Nidestream answered " + response.status);
     return await response.json();
   } finally {
     clearTimeout(timer);
@@ -93,13 +93,13 @@ async function sendLinks(links, tab, source) {
 
 function toast(tabId, text) {
   if (tabId == null || tabId < 0) return;
-  chrome.tabs.sendMessage(tabId, { type: "swiftdm-toast", text }).catch(() => {});
+  chrome.tabs.sendMessage(tabId, { type: "nidestream-toast", text }).catch(() => {});
 }
 
 function explain(error) {
-  if (String(error?.message || error) === "offline") return "SwiftDM isn't running. Open the app and try again.";
+  if (String(error?.message || error) === "offline") return "Nidestream isn't running. Open the app and try again.";
   if (String(error?.message || error) === "no-media") return "No downloadable stream found yet. Play the video for a moment, then try again.";
-  return "Couldn't send this to SwiftDM.";
+  return "Couldn't send this to Nidestream.";
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +151,10 @@ chrome.downloads.onCreated.addListener(async (item) => {
 
 function createMenus() {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "swiftdm-link", title: "Download with SwiftDM", contexts: ["link"] });
-    chrome.contextMenus.create({ id: "swiftdm-media", title: "Download media with SwiftDM", contexts: ["video", "audio"] });
-    chrome.contextMenus.create({ id: "swiftdm-selection", title: "Download selected links with SwiftDM", contexts: ["selection"] });
-    chrome.contextMenus.create({ id: "swiftdm-page", title: "Download all links with SwiftDM", contexts: ["page"] });
+    chrome.contextMenus.create({ id: "nidestream-link", title: "Download with Nidestream", contexts: ["link"] });
+    chrome.contextMenus.create({ id: "nidestream-media", title: "Download media with Nidestream", contexts: ["video", "audio"] });
+    chrome.contextMenus.create({ id: "nidestream-selection", title: "Download selected links with Nidestream", contexts: ["selection"] });
+    chrome.contextMenus.create({ id: "nidestream-page", title: "Download all links with Nidestream", contexts: ["page"] });
   });
 }
 chrome.runtime.onInstalled.addListener(createMenus);
@@ -163,15 +163,15 @@ chrome.runtime.onStartup.addListener(createMenus);
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
     switch (info.menuItemId) {
-      case "swiftdm-link":
+      case "nidestream-link":
         await sendDownload({ url: info.linkUrl, referrer: info.pageUrl, pageTitle: tab?.title });
         break;
-      case "swiftdm-media":
+      case "nidestream-media":
         await downloadMedia(tab, info.srcUrl);
         break;
-      case "swiftdm-selection":
-      case "swiftdm-page":
-        await sendPageLinks(tab, info.menuItemId === "swiftdm-selection", info.frameId);
+      case "nidestream-selection":
+      case "nidestream-page":
+        await sendPageLinks(tab, info.menuItemId === "nidestream-selection", info.frameId);
         break;
     }
   } catch (error) {
@@ -232,7 +232,7 @@ function persistMedia() {
 
 function updateBadge(tabId) {
   const count = media.get(tabId)?.size || 0;
-  chrome.action.setBadgeBackgroundColor({ tabId, color: "#2F6FEB" }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ tabId, color: "#1A7FD6" }).catch(() => {});
   chrome.action.setBadgeText({ tabId, text: count ? String(count) : "" }).catch(() => {});
 }
 

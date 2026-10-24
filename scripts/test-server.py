@@ -1,4 +1,4 @@
-"""Local test server for SwiftDM's download engine.
+"""Local test server for Nidestream's download engine.
 
 Serves files from ROOT with Range/If-Range support and a per-connection speed cap (so
 multi-connection speedups are visible), a /norange/ prefix that ignores Range headers,

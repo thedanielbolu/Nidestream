@@ -1,5 +1,5 @@
 import AppKit
-import SwiftDMCore
+import NidestreamCore
 import SwiftUI
 
 struct FoundLink: Identifiable, Hashable {
@@ -354,7 +354,7 @@ struct CountdownView: View {
         VStack(spacing: 14) {
             Image(systemName: "checkmark.circle.fill").font(.system(size: 36)).foregroundStyle(.green)
             Text("The download queue has finished").font(.headline)
-            Text("SwiftDM will \(verb) in \(remaining) seconds.").foregroundStyle(.secondary)
+            Text("Nidestream will \(verb) in \(remaining) seconds.").foregroundStyle(.secondary)
             HStack {
                 Button("Cancel", role: .cancel, action: close).keyboardShortcut(.cancelAction)
                 Button("\(action.title) Now") {

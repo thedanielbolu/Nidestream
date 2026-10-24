@@ -1,9 +1,9 @@
 import AppKit
-import SwiftDMCore
+import NidestreamCore
 import SwiftUI
 import UserNotifications
 
-struct SwiftDMApp: App {
+struct NidestreamApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     private var menuBarInserted: Binding<Bool> {
@@ -18,7 +18,7 @@ struct SwiftDMApp: App {
     }
 
     var body: some Scene {
-        Window("SwiftDM", id: "main") {
+        Window("Nidestream", id: "main") {
             MainView()
                 .frame(minWidth: 860, minHeight: 460)
         }
@@ -57,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             if running > 0 {
                 let alert = NSAlert()
                 alert.messageText = running == 1 ? "A download is in progress" : "\(running) downloads are in progress"
-                alert.informativeText = "They'll be paused. You can resume them the next time you open SwiftDM."
+                alert.informativeText = "They'll be paused. You can resume them the next time you open Nidestream."
                 alert.addButton(withTitle: "Quit")
                 alert.addButton(withTitle: "Cancel")
                 if alert.runModal() != .alertFirstButtonReturn { return .terminateCancel }

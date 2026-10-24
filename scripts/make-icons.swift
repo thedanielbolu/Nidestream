@@ -1,8 +1,15 @@
 // Draws the app and extension icons. Run: swift scripts/make-icons.swift <output-folder>
+//
+// The Nidestream mark: a bold download arrow landing in ripples, on a light sky-blue tile.
 import AppKit
 
 let output = URL(fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "build/icons")
 try? FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+
+func color(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
+    NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
+}
 
 /// `inset` leaves the transparent margin macOS app icons use; extension icons fill the canvas.
 func drawIcon(size: CGFloat, inset: Bool) -> NSBitmapImageRep {
@@ -11,51 +18,93 @@ func drawIcon(size: CGFloat, inset: Bool) -> NSBitmapImageRep {
                                bytesPerRow: 0, bitsPerPixel: 0)!
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSGraphicsContext.current?.imageInterpolation = .high
     let margin = inset ? size * 0.098 : size * 0.02
     let rect = NSRect(x: margin, y: margin, width: size - 2 * margin, height: size - 2 * margin)
     let radius = rect.width * 0.225
+    let unit = rect.width / 100
+    func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint { NSPoint(x: rect.minX + x * unit, y: rect.minY + y * unit) }
 
-    if inset {
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.28)
-        shadow.shadowBlurRadius = size * 0.02
-        shadow.shadowOffset = NSSize(width: 0, height: -size * 0.008)
-        shadow.set()
-    }
+    // Tile: pale sky at the top deepening to light blue, with a soft shadow under the icon.
     let tile = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
-    NSGradient(colors: [NSColor(calibratedRed: 0.20, green: 0.56, blue: 1.00, alpha: 1),
-                        NSColor(calibratedRed: 0.29, green: 0.25, blue: 0.86, alpha: 1)])!.draw(in: tile, angle: -90)
-    NSShadow().set()
+    if inset {
+        NSGraphicsContext.current?.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = color(0x0B4F8A, 0.30)
+        shadow.shadowBlurRadius = size * 0.022
+        shadow.shadowOffset = NSSize(width: 0, height: -size * 0.01)
+        shadow.set()
+        color(0xA9DCFF).setFill()
+        tile.fill()
+        NSGraphicsContext.current?.restoreGraphicsState()
+    }
+    NSGradient(colors: [color(0xF2FBFF), color(0xCBEBFF), color(0x8ED0FF)],
+               atLocations: [0, 0.45, 1], colorSpace: .sRGB)!.draw(in: tile, angle: -90)
 
-    // Soft highlight at the top.
     NSGraphicsContext.current?.saveGraphicsState()
     tile.addClip()
-    NSGradient(colors: [NSColor.white.withAlphaComponent(0.22), NSColor.white.withAlphaComponent(0)])!
-        .draw(in: NSRect(x: rect.minX, y: rect.midY, width: rect.width, height: rect.height / 2), angle: -90)
+    // Glow behind the arrow.
+    NSGradient(colors: [color(0xFFFFFF, 0.75), color(0xFFFFFF, 0)])!
+        .draw(fromCenter: point(50, 58), radius: 0, toCenter: point(50, 58), radius: 46 * unit, options: [])
+    // Ripples where the arrow lands.
+    for (index, (width, height, alpha)) in [(70.0, 15.0, 0.16), (50.0, 10.0, 0.26), (30.0, 6.0, 0.4)].enumerated() {
+        let ripple = NSBezierPath(ovalIn: NSRect(x: rect.minX + (50 - width / 2) * unit, y: rect.minY + (19 - height / 2) * unit,
+                                                 width: width * unit, height: height * unit))
+        ripple.lineWidth = max(1, unit * (index == 2 ? 2.4 : 2))
+        color(0x1C7FD6, alpha).setStroke()
+        ripple.stroke()
+    }
     NSGraphicsContext.current?.restoreGraphicsState()
 
-    // Speed lines on the left, arrow in the middle, tray at the bottom.
-    NSColor.white.setFill()
-    let unit = rect.width / 100
-    for (index, length) in [CGFloat(11), 17, 11].enumerated() {
-        let y = rect.minY + unit * (56 - CGFloat(index) * 9)
-        NSBezierPath(roundedRect: NSRect(x: rect.minX + unit * 12, y: y, width: unit * length, height: unit * 4.2),
-                     xRadius: unit * 2.1, yRadius: unit * 2.1).fill()
+    // The arrow: a shaft with a rounded top and a head with rounded corners, sharing one gradient.
+    let shaft = NSBezierPath(roundedRect: NSRect(x: rect.minX + 42.5 * unit, y: rect.minY + 46 * unit,
+                                                 width: 15 * unit, height: 45.5 * unit),
+                             xRadius: 7.5 * unit, yRadius: 7.5 * unit)
+    let left = point(24, 52), right = point(76, 52), tip = point(50, 23)
+    let corner = 3.2 * unit
+    let head = NSBezierPath()
+    head.move(to: NSPoint(x: (left.x + right.x) / 2, y: left.y))
+    head.appendArc(from: right, to: tip, radius: corner)
+    head.appendArc(from: tip, to: left, radius: corner * 1.3)
+    head.appendArc(from: left, to: right, radius: corner)
+    head.close()
+
+    NSGraphicsContext.current?.saveGraphicsState()
+    let shadow = NSShadow()
+    shadow.shadowColor = color(0x0B4F8A, 0.25)
+    shadow.shadowBlurRadius = unit * 2
+    shadow.shadowOffset = NSSize(width: 0, height: -unit * 0.8)
+    shadow.set()
+    color(0x1A73D9).setFill()
+    shaft.fill()
+    head.fill()
+    NSGraphicsContext.current?.restoreGraphicsState()
+
+    let gradient = NSGradient(colors: [color(0x5DBBF8), color(0x2B93EC), color(0x1565C0)])!
+    let span = NSRect(x: rect.minX + 24 * unit, y: rect.minY + 23 * unit, width: 52 * unit, height: 68.5 * unit)
+    for part in [shaft, head] {
+        NSGraphicsContext.current?.saveGraphicsState()
+        part.addClip()
+        gradient.draw(in: span, angle: -90)
+        NSGraphicsContext.current?.restoreGraphicsState()
     }
-    let arrow = NSBezierPath()
-    let cx = rect.minX + unit * 57
-    arrow.move(to: NSPoint(x: cx - unit * 9, y: rect.minY + unit * 80))
-    arrow.line(to: NSPoint(x: cx + unit * 9, y: rect.minY + unit * 80))
-    arrow.line(to: NSPoint(x: cx + unit * 9, y: rect.minY + unit * 50))
-    arrow.line(to: NSPoint(x: cx + unit * 22, y: rect.minY + unit * 50))
-    arrow.line(to: NSPoint(x: cx, y: rect.minY + unit * 27))
-    arrow.line(to: NSPoint(x: cx - unit * 22, y: rect.minY + unit * 50))
-    arrow.line(to: NSPoint(x: cx - unit * 9, y: rect.minY + unit * 50))
-    arrow.close()
-    arrow.lineJoinStyle = .round
-    arrow.fill()
-    NSBezierPath(roundedRect: NSRect(x: cx - unit * 27, y: rect.minY + unit * 16, width: unit * 54, height: unit * 6),
-                 xRadius: unit * 3, yRadius: unit * 3).fill()
+
+    // A thin highlight down the shaft.
+    let highlight = NSBezierPath()
+    highlight.move(to: point(53.6, 84))
+    highlight.line(to: point(53.6, 62))
+    highlight.lineWidth = max(0.5, unit * 1.1)
+    highlight.lineCapStyle = .round
+    color(0xFFFFFF, 0.55).setStroke()
+    highlight.stroke()
+
+    // Highlight along the top edge of the tile.
+    if inset {
+        let edge = NSBezierPath(roundedRect: rect.insetBy(dx: unit * 0.6, dy: unit * 0.6), xRadius: radius, yRadius: radius)
+        edge.lineWidth = max(1, unit * 0.9)
+        color(0xFFFFFF, 0.7).setStroke()
+        edge.stroke()
+    }
 
     NSGraphicsContext.restoreGraphicsState()
     return rep

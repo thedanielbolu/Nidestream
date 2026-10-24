@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import SwiftDMCore
+import NidestreamCore
 
 enum PostQueueAction: String, Codable, CaseIterable, Identifiable {
     case nothing, quit, sleep, shutDown
@@ -10,7 +10,7 @@ enum PostQueueAction: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .nothing: return "Do nothing"
-        case .quit: return "Quit SwiftDM"
+        case .quit: return "Quit Nidestream"
         case .sleep: return "Put the Mac to sleep"
         case .shutDown: return "Shut down the Mac"
         }

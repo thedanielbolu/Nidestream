@@ -1,7 +1,7 @@
 // Floating "Download video" button over large videos, plus toasts from the background script.
 (() => {
-  if (window.__swiftdmLoaded) return;
-  window.__swiftdmLoaded = true;
+  if (window.__nidestreamLoaded) return;
+  window.__nidestreamLoaded = true;
 
   let host = null;
   let button = null;
@@ -11,7 +11,7 @@
 
   function ensureUI() {
     if (host) return;
-    host = document.createElement("swiftdm-overlay");
+    host = document.createElement("nidestream-overlay");
     host.style.cssText = "all: initial; position: fixed; inset: 0 auto auto 0; width: 0; height: 0; z-index: 2147483647;";
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = `
@@ -19,10 +19,10 @@
         button {
           position: fixed; display: none; align-items: center; gap: 6px; padding: 6px 11px 6px 9px;
           font: 600 12px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; color: #fff;
-          background: rgba(30, 90, 220, 0.92); border: 1px solid rgba(255,255,255,0.25); border-radius: 999px;
+          background: rgba(26, 127, 214, 0.94); border: 1px solid rgba(255,255,255,0.25); border-radius: 999px;
           box-shadow: 0 2px 10px rgba(0,0,0,0.35); cursor: pointer; backdrop-filter: blur(6px);
         }
-        button:hover { background: rgba(20, 75, 200, 0.98); }
+        button:hover { background: rgba(21, 101, 192, 0.98); }
         svg { width: 14px; height: 14px; }
         .toast {
           position: fixed; right: 18px; bottom: 18px; max-width: 340px; padding: 10px 14px; border-radius: 10px;
@@ -32,7 +32,7 @@
         }
         .toast.show { opacity: 1; transform: none; }
       </style>
-      <button type="button" title="Download with SwiftDM">
+      <button type="button" title="Download with Nidestream">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10"/>
         </svg>
@@ -50,7 +50,7 @@
       if (!video) return;
       chrome.runtime.sendMessage({ type: "videoButton", src: video.currentSrc || video.src || "", title: document.title }, (response) => {
         if (chrome.runtime.lastError) return;
-        showToast(response?.error || "Sent to SwiftDM");
+        showToast(response?.error || "Sent to Nidestream");
       });
     });
     (document.body || document.documentElement).appendChild(host);
@@ -108,6 +108,6 @@
   window.addEventListener("scroll", () => { if (current && button) place(current); }, { passive: true, capture: true });
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type === "swiftdm-toast") showToast(message.text);
+    if (message?.type === "nidestream-toast") showToast(message.text);
   });
 })();

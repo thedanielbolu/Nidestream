@@ -1,5 +1,5 @@
 import AppKit
-import SwiftDMCore
+import NidestreamCore
 import SwiftUI
 import UniformTypeIdentifiers
 

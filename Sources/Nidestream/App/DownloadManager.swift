@@ -1,6 +1,6 @@
 import AppKit
 import Observation
-import SwiftDMCore
+import NidestreamCore
 
 /// What a new download starts from: the dialog, the browser extension, the clipboard, a batch…
 struct NewDownload {
@@ -509,7 +509,7 @@ final class DownloadManager {
                 }
                 try? fm.removeItem(at: item.record.hlsWorkDirectory)
             }
-            FileUtils.markAsDownloaded(record.fileURL, from: record.url, referrer: record.referrer, agentName: "SwiftDM")
+            FileUtils.markAsDownloaded(record.fileURL, from: record.url, referrer: record.referrer, agentName: "Nidestream")
             if let size = (try? record.fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
                 record.totalBytes = Int64(size)
                 record.receivedBytes = Int64(size)

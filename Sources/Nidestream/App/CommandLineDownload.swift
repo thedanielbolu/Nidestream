@@ -1,15 +1,15 @@
 import Foundation
-import SwiftDMCore
+import NidestreamCore
 
 /// Headless downloads for scripts:
-/// `SwiftDM --download <url> [--out <folder>] [--connections <n>] [--limit <KB/s>]`
+/// `Nidestream --download <url> [--out <folder>] [--connections <n>] [--limit <KB/s>]`
 enum CommandLineDownload {
     static func run(_ arguments: [String]) -> Int32 {
         func value(_ flag: String) -> String? {
             arguments.firstIndex(of: flag).flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
         }
         guard let address = value("--download"), let url = URL(string: address), url.scheme != nil else {
-            FileHandle.standardError.write(Data("usage: SwiftDM --download <url> [--out <folder>] [--connections <n>] [--limit <KB/s>]\n".utf8))
+            FileHandle.standardError.write(Data("usage: Nidestream --download <url> [--out <folder>] [--connections <n>] [--limit <KB/s>]\n".utf8))
             return 64
         }
         let directory = URL(fileURLWithPath: (value("--out") ?? FileManager.default.currentDirectoryPath) as NSString as String)
@@ -30,7 +30,7 @@ enum CommandLineDownload {
                     let size = probe.totalBytes >= 0 ? ByteCountFormatter.string(fromByteCount: probe.totalBytes, countStyle: .file) : "unknown size"
                     print("Saving \(name) (\(size), \(probe.acceptsRanges ? "resumable, \(connections) connections" : "single connection"))")
                 }
-                let workDirectory = directory.appendingPathComponent("." + name + ".sdmhls", isDirectory: true)
+                let workDirectory = directory.appendingPathComponent("." + name + ".nidestream-hls", isDirectory: true)
                 let started = Date()
                 let done = LockedValue<CheckedContinuation<Void, Never>?>(nil)
                 let sink: @Sendable (RunnerEvent) -> Void = { event in
@@ -60,7 +60,7 @@ enum CommandLineDownload {
                                     FileUtils.uniqueName((name as NSString).deletingPathExtension + " (audio)." + extra.pathExtension, in: directory)))
                             }
                             try? FileManager.default.removeItem(at: workDirectory)
-                            FileUtils.markAsDownloaded(destination, from: url, referrer: nil, agentName: "SwiftDM")
+                            FileUtils.markAsDownloaded(destination, from: url, referrer: nil, agentName: "Nidestream")
                             let seconds = Date().timeIntervalSince(started)
                             print("Done: \(destination.path) — \(ByteCountFormatter.string(fromByteCount: progress.receivedBytes, countStyle: .file)) in \(String(format: "%.1f", seconds)) s")
                             status.set(0)

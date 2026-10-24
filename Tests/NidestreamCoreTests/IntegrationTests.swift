@@ -1,18 +1,18 @@
 import CryptoKit
 import Foundation
 import Testing
-@testable import SwiftDMCore
+@testable import NidestreamCore
 
 /// Runs against `scripts/test-server.py` (range support, 2 MB/s per connection).
-/// Start it, then: `SWIFTDM_TEST_SERVER=http://127.0.0.1:8765 swift test`
-private let server = ProcessInfo.processInfo.environment["SWIFTDM_TEST_SERVER"]
+/// Start it, then: `NIDESTREAM_TEST_SERVER=http://127.0.0.1:8765 swift test`
+private let server = ProcessInfo.processInfo.environment["NIDESTREAM_TEST_SERVER"]
 
 @Suite(.enabled(if: server != nil), .serialized)
 struct IntegrationTests {
     let directory: URL
 
     init() throws {
-        directory = FileManager.default.temporaryDirectory.appendingPathComponent("swiftdm-tests-\(UUID().uuidString)")
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent("nidestream-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
@@ -41,7 +41,7 @@ struct IntegrationTests {
         let source = url("/big.bin")
         let probe = try await Prober.probe(url: source, headers: [:])
         #expect(probe.acceptsRanges)
-        let part = directory.appendingPathComponent("big.bin.sdmpart")
+        let part = directory.appendingPathComponent("big.bin.nidestream")
         var job = HTTPJob(url: source, partURL: part, totalBytes: probe.totalBytes, resumable: true, maxConnections: 8, validator: probe.validator)
 
         let (first, paused) = await run(job, stopAfter: 1.0)
@@ -64,7 +64,7 @@ struct IntegrationTests {
     @Test func resumeAddsConnectionsBySplitting() async throws {
         let source = url("/big.bin")
         let probe = try await Prober.probe(url: source, headers: [:])
-        let part = directory.appendingPathComponent("split.sdmpart")
+        let part = directory.appendingPathComponent("split.nidestream")
         // A single-connection run that gets paused, then resumed with more connections allowed.
         var job = HTTPJob(url: source, partURL: part, totalBytes: probe.totalBytes, resumable: true, maxConnections: 1, validator: probe.validator)
         let (stopped, progress) = await run(job, stopAfter: 1.5)
@@ -83,7 +83,7 @@ struct IntegrationTests {
     @Test func changedFileRestartsAsSingleStream() async throws {
         let source = url("/disposition.bin")
         let probe = try await Prober.probe(url: source, headers: [:])
-        let part = directory.appendingPathComponent("changed.sdmpart")
+        let part = directory.appendingPathComponent("changed.nidestream")
         var job = HTTPJob(url: source, partURL: part, totalBytes: probe.totalBytes, resumable: true, maxConnections: 2, validator: probe.validator)
         let (stopped, paused) = await run(job, stopAfter: 0.5)
         #expect(stopped == .stopped)
@@ -99,7 +99,7 @@ struct IntegrationTests {
     @Test func speedLimiterHoldsTheRate() async throws {
         let source = url("/big.bin") // 40 MB at ~16 MB/s unthrottled with 8 connections
         let probe = try await Prober.probe(url: source, headers: [:])
-        let job = HTTPJob(url: source, partURL: directory.appendingPathComponent("limited.sdmpart"), totalBytes: probe.totalBytes,
+        let job = HTTPJob(url: source, partURL: directory.appendingPathComponent("limited.nidestream"), totalBytes: probe.totalBytes,
                           resumable: true, maxConnections: 8, validator: probe.validator)
         let started = Date()
         let reached16 = LockedTime()

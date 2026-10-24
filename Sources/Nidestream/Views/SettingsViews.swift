@@ -1,5 +1,5 @@
 import AppKit
-import SwiftDMCore
+import NidestreamCore
 import SwiftUI
 
 struct QueueSchedulerView: View {
@@ -149,7 +149,7 @@ private struct GeneralSettings: View {
                 Toggle("Offer to download links I copy", isOn: $settings.prefs.monitorClipboard)
                 Toggle("Notify me when downloads finish", isOn: $settings.prefs.notify)
                 Toggle("Keep the Mac awake while downloading", isOn: $settings.prefs.preventSleep)
-                Toggle("Resume unfinished downloads when SwiftDM opens", isOn: $settings.prefs.resumeOnLaunch)
+                Toggle("Resume unfinished downloads when Nidestream opens", isOn: $settings.prefs.resumeOnLaunch)
                 Toggle("Show in the menu bar", isOn: $settings.prefs.showMenuBarIcon)
             }
             Section("Video streams") {
@@ -229,7 +229,7 @@ private struct BrowserSettings: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("**Chrome and other Chromium browsers:** open the Extensions page, turn on Developer mode, click “Load unpacked” and pick the extension folder.")
                     Text("**Firefox:** open about:debugging → This Firefox → “Load Temporary Add-on…” and pick manifest.json in the extension folder.")
-                    Text("**Safari:** use the clipboard monitor, drag links into SwiftDM, or this bookmarklet: `javascript:location.href='swiftdm://add?url='+encodeURIComponent(location.href)`")
+                    Text("**Safari:** use the clipboard monitor, drag links into Nidestream, or this bookmarklet: `javascript:location.href='nidestream://add?url='+encodeURIComponent(location.href)`")
                 }
                 .font(.callout)
                 .textSelection(.enabled)
@@ -382,7 +382,7 @@ struct MenuBarView: View {
         let active = manager.items.filter { $0.record.status.isRunning || $0.record.status == .queued }
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("SwiftDM").font(.headline)
+                Text("Nidestream").font(.headline)
                 Spacer()
                 Text(Fmt.speed(manager.totalSpeed)).monospacedDigit().foregroundStyle(.secondary)
             }
@@ -416,7 +416,7 @@ struct MenuBarView: View {
             }
             Divider()
             HStack {
-                Button("Open SwiftDM") {
+                Button("Open Nidestream") {
                     openWindow(id: "main")
                     NSApp.activate()
                 }

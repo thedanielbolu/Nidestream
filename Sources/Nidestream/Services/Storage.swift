@@ -1,17 +1,17 @@
 import Foundation
 import Security
-import SwiftDMCore
+import NidestreamCore
 
 enum Persistence {
     static var supportDirectory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let directory = base.appendingPathComponent("SwiftDM", isDirectory: true)
+        let directory = base.appendingPathComponent("Nidestream", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }
 
     private static var downloadsFile: URL { supportDirectory.appendingPathComponent("downloads.json") }
-    private static let ioQueue = DispatchQueue(label: "swiftdm.persistence", qos: .utility)
+    private static let ioQueue = DispatchQueue(label: "nidestream.persistence", qos: .utility)
 
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -40,7 +40,7 @@ enum Persistence {
 
 /// Passwords for downloads and site logins. Nothing secret goes into the JSON files.
 enum Keychain {
-    private static let service = "app.swiftdm.credentials"
+    private static let service = "app.nidestream.credentials"
 
     static func set(_ password: String, account: String) {
         delete(account: account)
