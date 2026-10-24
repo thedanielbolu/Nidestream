@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon48.png" alt="">
+    <div>
+      <h1>SwiftDM</h1>
+      <p id="status" class="muted">Checking…</p>
+    </div>
+  </header>
+
+  <label class="toggle">
+    <input type="checkbox" id="capture">
+    <span>Take over downloads from this browser</span>
+  </label>
+
+  <section>
+    <h2>Media on this page</h2>
+    <ul id="media"></ul>
+    <p id="empty" class="muted">Nothing yet. Start playing a video and it will show up here.</p>
+  </section>
+
+  <footer>
+    <button id="allLinks">Download all links on this page…</button>
+  </footer>
+  <script src="popup.js"></script>
+</body>
+</html>
