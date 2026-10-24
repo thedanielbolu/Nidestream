@@ -70,10 +70,12 @@ The extension does not collect user data: nothing it handles leaves the user's M
 addresses, page addresses, page titles and the cookies needed for a download are passed to the
 Nidestream app on the same computer over 127.0.0.1, and used only to download the file.
 
-The form's checkboxes ask what you collect. If you want to be conservative, tick **Web history** and
-**Authentication information** and explain that they're used only on the device, by the companion app,
-to perform downloads the user asked for. Then tick all three certifications (not sold, not used for
-unrelated purposes, not used for creditworthiness).
+Tick **Authentication information** (the cookies a download needs), **Web history** (the addresses and
+titles of pages downloads come from) and **Website content** (the links read from a page for "Download all
+links"). Strictly, none of it leaves the Mac, but declaring it matches the permissions a reviewer sees, and
+the privacy policy explains that it all stays on the device. Leave the other types unticked, then tick all
+three certifications: Nidestream doesn't sell user data, doesn't use it beyond downloading, and doesn't use
+it for credit decisions.
 
 ## Firefox: data collection
 
