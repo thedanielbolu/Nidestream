@@ -211,3 +211,46 @@ enum CCCryptShim {
         #expect(delay > 0.9 && delay < 1.1)
     }
 }
+
+@Suite struct LinkRefreshTests {
+    private func record(_ name: String, total: Int64, received: Int64 = 1000) -> DownloadRecord {
+        var record = DownloadRecord(url: URL(string: "https://old.example.com/a")!, fileName: name, directory: URL(fileURLWithPath: "/tmp"))
+        record.totalBytes = total
+        record.receivedBytes = received
+        record.status = .failed
+        record.etag = "\"old\""
+        record.segments = [Segment(id: 0, start: 0, end: total - 1, received: received)]
+        return record
+    }
+
+    private func probe(_ name: String, total: Int64, ranges: Bool = true) -> ProbeResult {
+        ProbeResult(finalURL: URL(string: "https://cdn2.example.com/b")!, statusCode: 206, totalBytes: total, acceptsRanges: ranges,
+                    fileName: name, mimeType: "application/zip", etag: "\"new\"", lastModified: nil, isHLS: false)
+    }
+
+    @Test func matchesSameNameAndSize() {
+        #expect(LinkRefresh.isSameFile(record("setup.zip", total: 5000), as: probe("setup.zip", total: 5000)))
+        #expect(LinkRefresh.isSameFile(record("Setup (1).zip", total: 5000), as: probe("setup.zip", total: 5000)))
+    }
+
+    @Test func rejectsDifferentFiles() {
+        #expect(!LinkRefresh.isSameFile(record("setup.zip", total: 5000), as: probe("setup.zip", total: 5001)))
+        #expect(!LinkRefresh.isSameFile(record("setup.zip", total: 5000), as: probe("other.zip", total: 5000)))
+        #expect(!LinkRefresh.isSameFile(record("setup.zip", total: 5000), as: probe("setup.zip", total: 5000, ranges: false)))
+        var done = record("setup.zip", total: 5000)
+        done.status = .completed
+        #expect(!LinkRefresh.isSameFile(done, as: probe("setup.zip", total: 5000)))
+    }
+
+    @Test func refreshKeepsProgressAndTakesNewFingerprint() {
+        let old = record("setup.zip", total: 5000, received: 2500)
+        let url = URL(string: "https://cdn2.example.com/b?token=fresh")!
+        let updated = LinkRefresh.refreshed(old, with: probe("setup.zip", total: 5000), url: url)
+        #expect(updated.url == url)
+        #expect(updated.etag == "\"new\"")
+        #expect(updated.validator == "\"new\"")
+        #expect(updated.segments == old.segments)
+        #expect(updated.receivedBytes == 2500)
+        #expect(updated.lastError == nil)
+    }
+}

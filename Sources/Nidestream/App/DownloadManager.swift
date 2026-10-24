@@ -21,6 +21,8 @@ struct NewDownload {
     var note: String?
     var totalBytes: Int64?
     var mimeType: String?
+    /// When the link turns out to serve a file that's already partly downloaded, continue that download.
+    var continueExisting = true
 }
 
 @MainActor @Observable
@@ -38,6 +40,8 @@ final class DownloadManager {
     @ObservationIgnored private var lastSave = Date.distantPast
     @ObservationIgnored private var activity: NSObjectProtocol?
     @ObservationIgnored private var queueDidWork = false
+    /// New downloads the user asked to fetch again rather than continue an existing copy.
+    @ObservationIgnored private var keepSeparate: Set<UUID> = []
 
     private var prefs: Preferences { SettingsStore.shared.prefs }
 
@@ -112,6 +116,7 @@ final class DownloadManager {
             Keychain.set(password, account: Keychain.downloadAccount(record.id))
         }
 
+        if !new.continueExisting { keepSeparate.insert(record.id) }
         let item = DownloadItem(record: record)
         items.append(item)
         pump()
@@ -216,17 +221,77 @@ final class DownloadManager {
         remove(items.filter { $0.record.status == .completed }, deleteFiles: false)
     }
 
-    /// "Refresh download address": point an unfinished download at a new link without losing progress.
-    func updateAddress(_ item: DownloadItem, to url: URL) {
-        let wasRunning = item.record.status.isRunning
-        if wasRunning { stopRunner(item) }
-        item.record.url = url
-        if wasRunning {
-            item.record.status = .queued
-            item.record.startWhenPossible = true
+    // MARK: - Newer links
+
+    /// A paused or failed download with progress that `probe` shows to be the same file.
+    func unfinishedMatch(for probe: ProbeResult, excluding id: UUID? = nil) -> DownloadItem? {
+        items.first {
+            $0.id != id && $0.record.receivedBytes > 0 && !$0.record.status.isRunning && LinkRefresh.isSameFile($0.record, as: probe)
         }
+    }
+
+    /// Points an unfinished download at a newer link and continues it from where it stopped.
+    func continueDownload(_ item: DownloadItem, with url: URL, probe: ProbeResult, from new: NewDownload? = nil) {
+        if item.record.status.isRunning { stopRunner(item) }
+        runIDs[item.id] = nil
+        var record = LinkRefresh.refreshed(item.record, with: probe, url: url)
+        if let new {
+            record.referrer = new.referrer ?? record.referrer
+            record.cookies = new.cookies ?? record.cookies
+            record.userAgent = new.userAgent ?? record.userAgent
+        }
+        record.status = .queued
+        record.startWhenPossible = true
+        item.record = record
+        let percent = Int(item.progress * 100)
+        Notifier.post(title: "Continuing download", body: "\(record.fileName) picks up at \(percent)% with the new link.", file: nil)
         pump()
         save()
+    }
+
+    enum AddressChange {
+        case continued
+        case replaced
+        case rejected(String)
+    }
+
+    /// "Change Address": checks the new link and, if it serves the same file, continues from it.
+    func changeAddress(_ item: DownloadItem, to url: URL) async -> AddressChange {
+        guard item.record.receivedBytes > 0, item.record.kind == .http else {
+            // Nothing downloaded yet, so there's no progress to protect.
+            let wasRunning = item.record.status.isRunning
+            if wasRunning { stopRunner(item) }
+            item.record.url = url
+            item.record.lastError = nil
+            if wasRunning || item.record.status == .failed {
+                item.record.status = .queued
+                item.record.startWhenPossible = true
+            }
+            pump()
+            save()
+            return .replaced
+        }
+        do {
+            let probe = try await Prober.probe(url: url, headers: requestHeaders(for: item.record), credential: credential(for: item.record),
+                                               proxy: prefs.proxy, timeout: TimeInterval(prefs.timeoutSeconds))
+            // The user vouches for this link, so only the size and resume support have to match, not the name.
+            var named = probe
+            named.fileName = item.record.fileName
+            guard LinkRefresh.isSameFile(item.record, as: named) else {
+                if !probe.acceptsRanges { return .rejected("That server can't resume downloads, so the file would have to start over.") }
+                let size = probe.totalBytes >= 0 ? Fmt.bytes(probe.totalBytes) : "unknown size"
+                return .rejected("That link serves a different file (“\(probe.fileName)”, \(size)). Use Restart to download it from scratch.")
+            }
+            continueDownload(item, with: url, probe: probe)
+            return .continued
+        } catch {
+            return .rejected((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+        }
+    }
+
+    private static func explainFailure(_ message: String, receivedBytes: Int64) -> String {
+        guard receivedBytes > 0, ["HTTP 401", "HTTP 403", "HTTP 404", "HTTP 410"].contains(where: message.contains) else { return message }
+        return message + " The link has probably expired. Get a fresh one (click it again in your browser) and Nidestream will continue from where it stopped."
     }
 
     func setPassword(_ password: String?, username: String?, for item: DownloadItem) {
@@ -356,6 +421,17 @@ final class DownloadManager {
                 try Task.checkCancellation()
                 guard let self, self.runIDs[id] == runID, let item = self.item(id) else { return }
                 self.launches[id] = nil
+                if let probe, !self.keepSeparate.contains(id), let existing = self.unfinishedMatch(for: probe, excluding: id) {
+                    // This file is already partly downloaded: continue that download with the new link instead.
+                    self.runIDs[id] = nil
+                    self.items.removeAll { $0.id == id }
+                    var source = NewDownload(url: record.url)
+                    source.referrer = record.referrer
+                    source.cookies = record.cookies
+                    source.userAgent = record.userAgent
+                    self.continueDownload(existing, with: record.url, probe: probe, from: source)
+                    return
+                }
                 if let probe { self.apply(probe, to: item) }
                 try self.checkDiskSpace(item.record)
                 let runner = self.makeRunner(for: item, runID: runID, headers: headers, credential: credential)
@@ -462,7 +538,7 @@ final class DownloadManager {
                 if item.record.status.isRunning { item.record.status = .paused }
             case .failed(let message):
                 item.record.status = .failed
-                item.record.lastError = message
+                item.record.lastError = Self.explainFailure(message, receivedBytes: item.record.receivedBytes)
                 Notifier.downloadFailed(item)
             }
             pump()

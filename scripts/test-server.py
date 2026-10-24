@@ -2,6 +2,8 @@
 
 Serves files from ROOT with Range/If-Range support and a per-connection speed cap (so
 multi-connection speedups are visible), a /norange/ prefix that ignores Range headers,
+a /mirror/ prefix that serves the same files with a different ETag (like another CDN node),
+a /shared/ prefix where all connections share one SHARED_RATE cap (so extra connections don't help),
 and /sha256/<name> with the expected checksum.
 
     python3 scripts/test-server.py [port] [root]
@@ -9,6 +11,9 @@ and /sha256/<name> with the expected checksum.
 import hashlib, http.server, os, re, sys, time, socketserver, threading
 ROOT = os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "files")
 RATE = int(os.environ.get("RATE", str(2 * 1024 * 1024)))  # bytes/sec per connection
+SHARED_RATE = int(os.environ.get("SHARED_RATE", str(8 * 1024 * 1024)))  # bytes/sec across all /shared/ connections
+shared = {"next": 0.0}
+shared_lock = threading.Lock()
 CONNS = {"n": 0, "max": 0}
 lock = threading.Lock()
 
@@ -19,6 +24,10 @@ class H(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         norange = path.startswith("/norange/")
         if norange: path = path[len("/norange"):]
+        mirror = path.startswith("/mirror/")
+        if mirror: path = path[len("/mirror"):]
+        capped = path.startswith("/shared/")
+        if capped: path = path[len("/shared"):]
         if path.startswith("/sha256/"):
             with open(os.path.join(ROOT, path[len("/sha256/"):]), "rb") as f:
                 body = hashlib.sha256(f.read()).hexdigest().encode()
@@ -30,7 +39,7 @@ class H(http.server.BaseHTTPRequestHandler):
         if not os.path.isfile(fp):
             self.send_response(404); self.send_header("Content-Length", "0"); self.end_headers(); return
         size = os.path.getsize(fp)
-        etag = '"%x-%x"' % (size, int(os.path.getmtime(fp)))
+        etag = '"%x-%x%s"' % (size, int(os.path.getmtime(fp)), "-mirror" if mirror else "")
         start, end, status = 0, size - 1, 200
         rng = self.headers.get("Range")
         ifr = self.headers.get("If-Range")
@@ -59,6 +68,11 @@ class H(http.server.BaseHTTPRequestHandler):
                 t0 = time.time(); sent = 0
                 while left > 0:
                     data = f.read(min(chunk, left))
+                    if capped:
+                        with shared_lock:
+                            start_at = max(time.time(), shared["next"])
+                            shared["next"] = start_at + len(data) / SHARED_RATE
+                        time.sleep(max(0, start_at - time.time()))
                     self.wfile.write(data); left -= len(data); sent += len(data)
                     ahead = sent / RATE - (time.time() - t0)
                     if ahead > 0 and not fp.endswith((".m3u8", ".ts", ".key")): time.sleep(ahead)

@@ -24,6 +24,8 @@ struct AddDownloadView: View {
     @State private var probe: ProbeState = .idle
     @State private var master: HLSMasterPlaylist?
     @State private var variant: URL?
+    /// A partly finished download of the same file that this link can continue.
+    @State private var match: DownloadItem?
 
     private enum ProbeState {
         case idle, checking
@@ -95,7 +97,7 @@ struct AddDownloadView: View {
                     }
                 }
                 Stepper(value: $connections, in: 1...32) {
-                    LabeledContent("Connections", value: "\(connections)")
+                    LabeledContent("Max connections", value: "\(connections)")
                 }
                 DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
                     TextField("Referrer", text: $referrer)
@@ -107,7 +109,23 @@ struct AddDownloadView: View {
             .formStyle(.grouped)
             .scrollDisabled(true)
 
-            if let url, let existing = DownloadManager.shared.existingDownload(for: url) {
+            if let match {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("You already have part of this file").font(.callout.weight(.semibold))
+                        Text("“\(match.record.fileName)” is \(Int(match.progress * 100))% done (\(Fmt.bytes(match.record.receivedBytes)) of \(Fmt.bytes(match.record.totalBytes))). Continue it with this link instead of starting over.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+            } else if let url, let existing = DownloadManager.shared.existingDownload(for: url) {
                 Label("This link is already in your list (\(existing.statusText.lowercased())).", systemImage: "exclamationmark.circle")
                     .font(.callout)
                     .foregroundStyle(.orange)
@@ -119,9 +137,13 @@ struct AddDownloadView: View {
                 Spacer()
                 Button("Download Later") { submit(start: false) }
                     .disabled(url == nil)
-                Button("Start Download") { submit(start: true) }
-                    .keyboardShortcut(.defaultAction)
+                Button(match == nil ? "Start Download" : "Download Again") { submit(start: true) }
+                    .keyboardShortcut(match == nil ? .defaultAction : nil)
                     .disabled(url == nil)
+                if let match {
+                    Button("Continue Download") { continueExisting(match) }
+                        .keyboardShortcut(.defaultAction)
+                }
             }
         }
         .padding(20)
@@ -180,6 +202,7 @@ struct AddDownloadView: View {
 
     private func check() async {
         master = nil
+        match = nil
         guard let url else {
             probe = .idle
             return
@@ -209,6 +232,7 @@ struct AddDownloadView: View {
                 if !directoryEdited { directory = DownloadManager.shared.folder(for: categoryID) }
             }
             probe = .done(result)
+            match = result.isHLS ? nil : DownloadManager.shared.unfinishedMatch(for: result)
         } catch {
             guard !Task.isCancelled else { return }
             probe = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
@@ -238,6 +262,14 @@ struct AddDownloadView: View {
         }
     }
 
+    private func continueExisting(_ item: DownloadItem) {
+        guard let url, case .done(let result) = probe else { return }
+        var source = base ?? NewDownload(url: url)
+        if !referrer.isEmpty { source.referrer = referrer }
+        DownloadManager.shared.continueDownload(item, with: url, probe: result, from: source)
+        close()
+    }
+
     private func submit(start: Bool) {
         guard let url else { return }
         var new = base ?? NewDownload(url: url)
@@ -250,6 +282,7 @@ struct AddDownloadView: View {
         new.username = username.isEmpty ? nil : username
         new.password = password.isEmpty ? nil : password
         new.speedLimitKBps = Int(speedLimit.trimmingCharacters(in: .whitespaces))
+        new.continueExisting = match == nil
         if case .done(let result) = probe {
             new.totalBytes = result.totalBytes
             new.mimeType = result.mimeType

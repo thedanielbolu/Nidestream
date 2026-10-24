@@ -8,10 +8,11 @@ Built with Swift, SwiftUI and AppKit. No third-party dependencies.
 
 | IDM feature | Nidestream |
 | --- | --- |
-| Download acceleration (dynamic file segmentation) | Up to 32 connections per file, each on its own TCP connection. When a connection finishes early it takes over half of the largest range still in progress. |
+| Download acceleration (dynamic file segmentation) | Up to 32 connections per file, each on its own TCP connection. When a connection finishes early it takes over half of the largest range still in progress. The number of connections adapts: it starts at 4 and adds more only while they make the download faster, so servers that cap each connection get the full speedup and servers that slow down under many connections don't. |
 | Resume broken downloads | Progress is saved every few seconds. Resumes after pauses, network errors, quitting or crashes, and uses `If-Range` to detect files that changed on the server. |
+| Refresh download address | When a link expires, click it again in the browser (or paste a new one): if the new link serves the same file (same name and size, resumable), Nidestream continues the existing download from where it stopped, even from a different server, instead of starting over. "Change Address" in the details panel does the same by hand. |
 | Error recovery | Per-connection retries with backoff. Detects servers that limit connections (403/429/503) and backs off to what they allow. Falls back to a single stream when ranges aren't supported. |
-| Browser integration | Extension for Chrome, Edge, Brave, Arc, Vivaldi, Opera and Firefox: takes over downloads of chosen file types (with cookies, referrer and user agent), adds "Download with Nidestream", "Download selected links" and "Download all links" menus. |
+| Browser integration | Extension for Chrome, Edge, Brave, Arc, Vivaldi, Opera and Firefox (tested in Chrome 155, Brave 156 and Firefox 158): takes over downloads of chosen file types (with cookies, referrer and user agent), adds "Download with Nidestream", "Download selected links" and "Download all links" menus. |
 | Video grabber | The extension detects video/audio files and HLS (`.m3u8`) streams as pages play them, shows them in its popup and puts a "Download video" button over large videos. HLS streams (including AES-128 encrypted ones) are downloaded segment by segment, with quality selection, and remuxed to MP4 with FFmpeg if it's installed. |
 | Queue and scheduler | "Download Later" puts files in the main queue. Start/stop the queue at set times on chosen days, limit how many files download at once, then quit, sleep or shut down when it's done. |
 | Speed limiter | Global limit (toolbar, menu bar, ⌥⌘L) plus optional per-file limits. |
@@ -74,8 +75,10 @@ scripts/test.sh
 
 This runs the unit tests, then starts `scripts/test-server.py`, a local server that serves files with
 byte ranges and a per-connection speed cap, and runs integration tests against it: pause/resume,
-resuming with more connections, detecting a changed file, the speed limiter, and HTTP errors.
-`scripts/test.sh --unit` runs only the unit tests.
+resuming with more connections, continuing from a newer link on another server, detecting a changed
+file, adding connections only while they help, the speed limiter, and HTTP errors.
+`scripts/test.sh --unit` runs only the unit tests. Set `NIDESTREAM_DEBUG=1` to trace each connection
+(launches, failures, and connection-count decisions) on stderr.
 
 ## Project layout
 

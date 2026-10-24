@@ -23,10 +23,15 @@ struct IntegrationTests {
     }
 
     /// Runs a downloader until it finishes; optionally stops it after `stopAfter` seconds.
-    private func run(_ job: HTTPJob, limiters: [RateLimiter] = [], stopAfter: TimeInterval? = nil) async -> (RunnerResult, DownloadProgress) {
+    private func run(_ job: HTTPJob, limiters: [RateLimiter] = [], stopAfter: TimeInterval? = nil,
+                     onProgress: @escaping @Sendable (DownloadProgress) -> Void = { _ in }) async -> (RunnerResult, DownloadProgress) {
         let box = LockedBox()
         let runner = SegmentedDownloader(job: job, limiters: limiters) { event in
-            if case .finished(let result, let progress) = event { box.finish(result, progress) }
+            switch event {
+            case .progress(let progress): onProgress(progress)
+            case .finished(let result, let progress): box.finish(result, progress)
+            case .processing: break
+            }
         }
         return await withCheckedContinuation { continuation in
             box.continuation = continuation
@@ -75,7 +80,7 @@ struct IntegrationTests {
         job.maxConnections = 6
         let (result, final) = await run(job)
         #expect(result == .completed(outputs: []))
-        #expect((final.segments ?? []).count >= 6)
+        #expect((final.segments ?? []).count >= 4)
         #expect(final.receivedBytes == probe.totalBytes)
         #expect(try sha256(part) == (try await expectedHash("big.bin")))
     }
@@ -94,6 +99,81 @@ struct IntegrationTests {
         #expect(final.resumable == false)
         #expect(final.receivedBytes == probe.totalBytes)
         #expect(try sha256(part) == (try await expectedHash("disposition.bin")))
+    }
+
+    /// IDM's "refresh download address": pause on one link, finish from another server that serves
+    /// the same file. Using the new server's ETag keeps the progress; the old one would force a restart.
+    @Test func continuesFromNewerLinkOnAnotherServer() async throws {
+        let original = url("/big.bin")
+        let probe = try await Prober.probe(url: original, headers: [:])
+        let part = directory.appendingPathComponent("moved.nidestream")
+        var job = HTTPJob(url: original, partURL: part, totalBytes: probe.totalBytes, resumable: true, maxConnections: 8, validator: probe.validator)
+        let (stopped, paused) = await run(job, stopAfter: 1.0)
+        #expect(stopped == .stopped)
+        let before = paused.receivedBytes
+        #expect(before > 0 && before < probe.totalBytes)
+
+        let newer = url("/mirror/big.bin")
+        let newProbe = try await Prober.probe(url: newer, headers: [:])
+        #expect(newProbe.etag != probe.etag)
+        var record = DownloadRecord(url: original, fileName: "big.bin", directory: directory)
+        record.totalBytes = probe.totalBytes
+        record.receivedBytes = before
+        record.status = .failed
+        record.segments = paused.segments ?? []
+        record.etag = probe.etag
+        #expect(LinkRefresh.isSameFile(record, as: newProbe))
+        let refreshed = LinkRefresh.refreshed(record, with: newProbe, url: newer)
+
+        job.url = refreshed.url
+        job.validator = refreshed.validator
+        job.segments = refreshed.segments
+        let reached = LockedTime()
+        let box = LockedBox()
+        let runner = SegmentedDownloader(job: job, limiters: []) { event in
+            switch event {
+            case .progress(let progress) where progress.receivedBytes < before:
+                reached.setOnce(0) // progress went backwards: the download restarted
+            case .finished(let result, let progress):
+                box.finish(result, progress)
+            default:
+                break
+            }
+        }
+        let (result, final) = await withCheckedContinuation { continuation in
+            box.continuation = continuation
+            runner.start()
+        }
+        #expect(result == .completed(outputs: []))
+        #expect(final.resumable, "the download fell back to starting over")
+        #expect(reached.value == nil, "progress went backwards")
+        #expect(try sha256(part) == (try await expectedHash("big.bin")))
+    }
+
+    /// The server caps each connection (2 MB/s here), like most file hosts: connections get added.
+    @Test func addsConnectionsWhileTheyHelp() async throws {
+        let source = url("/huge.bin") // 96 MB: long enough for more than one step
+        let probe = try await Prober.probe(url: source, headers: [:])
+        let job = HTTPJob(url: source, partURL: directory.appendingPathComponent("ramp.nidestream"), totalBytes: probe.totalBytes,
+                          resumable: true, maxConnections: 12, validator: probe.validator, initialConnections: 4, adaptiveWindow: 0.5)
+        let counts = LockedCounts()
+        let (result, _) = await run(job, onProgress: { counts.add($0.connections) })
+        #expect(result == .completed(outputs: []))
+        #expect(counts.maximum >= 8, "never went past \(counts.maximum) connections")
+    }
+
+    /// The server shares one cap across connections: extra connections are tried, then given back.
+    @Test func dropsConnectionsThatDontHelp() async throws {
+        let source = url("/shared/big.bin") // 8 MB/s in total, 2 MB/s per connection
+        let probe = try await Prober.probe(url: source, headers: [:])
+        let job = HTTPJob(url: source, partURL: directory.appendingPathComponent("shared.nidestream"), totalBytes: probe.totalBytes,
+                          resumable: true, maxConnections: 12, validator: probe.validator, initialConnections: 4, adaptiveWindow: 0.5)
+        let counts = LockedCounts()
+        let (result, _) = await run(job, onProgress: { counts.add($0.connections) })
+        #expect(result == .completed(outputs: []))
+        // After the first trial (about 2 s in) it should be back to 4 connections and stay there.
+        let settled = counts.values.dropFirst(5).dropLast(2)
+        #expect(!settled.isEmpty && settled.allSatisfy { $0 <= 4 }, "connections over time: \(counts.values)")
     }
 
     @Test func speedLimiterHoldsTheRate() async throws {
@@ -132,6 +212,16 @@ struct IntegrationTests {
             try await Prober.probe(url: url("/missing.bin"), headers: [:])
         }
     }
+}
+
+private final class LockedCounts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [Int] = []
+
+    var values: [Int] { lock.withLock { stored } }
+    var maximum: Int { values.max() ?? 0 }
+
+    func add(_ value: Int) { lock.withLock { stored.append(value) } }
 }
 
 private final class LockedTime: @unchecked Sendable {

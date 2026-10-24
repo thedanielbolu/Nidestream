@@ -14,11 +14,16 @@ public struct HTTPJob: Sendable {
     public var timeout: TimeInterval
     public var proxy: ProxySettings
     public var minSegmentSize: Int64
+    /// Connections to open at first; more are added while they make the download faster.
+    public var initialConnections: Int
+    /// How long each speed measurement for adding or dropping connections lasts.
+    public var adaptiveWindow: TimeInterval
 
     public init(url: URL, headers: [String: String] = [:], partURL: URL, totalBytes: Int64, resumable: Bool,
                 segments: [Segment] = [], maxConnections: Int = 8, validator: String? = nil, credential: URLCredential? = nil,
                 maxRetries: Int = 8, timeout: TimeInterval = 30, proxy: ProxySettings = .system,
-                minSegmentSize: Int64 = SegmentPlanner.minimumSegmentSize) {
+                minSegmentSize: Int64 = SegmentPlanner.minimumSegmentSize, initialConnections: Int = 4,
+                adaptiveWindow: TimeInterval = 2) {
         self.url = url
         self.headers = headers
         self.partURL = partURL
@@ -32,6 +37,8 @@ public struct HTTPJob: Sendable {
         self.timeout = timeout
         self.proxy = proxy
         self.minSegmentSize = minSegmentSize
+        self.initialConnections = initialConnections
+        self.adaptiveWindow = adaptiveWindow
     }
 }
 
@@ -40,6 +47,10 @@ public struct HTTPJob: Sendable {
 /// Every connection slot owns its own `URLSession`, so each range really travels over its own
 /// TCP connection (one shared session would multiplex them onto a single HTTP/2 connection).
 /// All mutable state is confined to `queue`; URLSession delegate callbacks run on it too.
+///
+/// The number of connections adapts: it starts at `initialConnections` and grows only while extra
+/// connections make the download faster. Many servers throttle each connection, so more is faster,
+/// but some slow every connection down when there are many, so more would be slower.
 ///
 /// Speed limiting paces requests rather than suspending tasks: URLSession keeps delivering
 /// data to a suspended task, so while a limit is set each connection asks for about a second's
@@ -55,6 +66,7 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
         let requestEnd: Int64
         let paced: Bool
         let token: UUID
+        let launchedAt: TimeInterval
     }
 
     private let job: HTTPJob
@@ -68,6 +80,14 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
     private var totalBytes: Int64
     private var resumable: Bool
     private var connectionLimit: Int
+    /// Most connections allowed: the job's maximum, lowered if the server pushes back.
+    private var ceiling: Int
+    private var windowStart: TimeInterval = 0
+    /// Bytes received when the current measurement started; -1 while waiting for connections to warm up.
+    private var windowReceived: Int64 = -1
+    /// Connections added on trial: kept only if the next measurement is clearly faster.
+    private var trial: (previousLimit: Int, baseline: Double)?
+    private var holdUntil: TimeInterval = 0
     private var sessions: [URLSession] = []
     private var idleSlots: [Int] = []
     private var connections: [Int: Connection] = [:]
@@ -78,6 +98,15 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
     private var suspendedUntil: [ObjectIdentifier: TimeInterval] = [:]
     private var fd: Int32 = -1
     private var timer: DispatchSourceTimer?
+    private let started = ProcessInfo.processInfo.systemUptime
+    /// Set NIDESTREAM_DEBUG=1 to trace connections on stderr.
+    private static let debugging = ProcessInfo.processInfo.environment["NIDESTREAM_DEBUG"] != nil
+
+    private func trace(_ message: @autoclosure () -> String) {
+        guard Self.debugging else { return }
+        let line = String(format: "[%6.2f] ", ProcessInfo.processInfo.systemUptime - started) + message() + "\n"
+        FileHandle.standardError.write(Data(line.utf8))
+    }
 
     public init(job: HTTPJob, limiters: [RateLimiter], onEvent: @escaping @Sendable (RunnerEvent) -> Void) {
         self.job = job
@@ -92,7 +121,8 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
         segments = job.segments
         totalBytes = job.totalBytes
         resumable = job.resumable && job.totalBytes > 0
-        connectionLimit = max(1, job.maxConnections)
+        ceiling = max(1, job.maxConnections)
+        connectionLimit = min(ceiling, max(1, job.initialConnections))
         super.init()
     }
 
@@ -133,10 +163,12 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
         timer.setEventHandler { [weak self] in
             guard let self, self.state == .running else { return }
+            self.adapt()
             self.onEvent(.progress(self.snapshot()))
         }
         timer.resume()
         self.timer = timer
+        windowStart = ProcessInfo.processInfo.systemUptime + warmup
         schedule()
     }
 
@@ -171,6 +203,7 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
     }
 
     private func launch(_ index: Int) {
+        trace("launch segment \(index) \(segments[index].position)-\(segments[index].end), \(connections.count + 1) connections")
         let slot = idleSlots.popLast() ?? makeSlot()
         if !resumable { segments[index].received = 0 }
         let segment = segments[index]
@@ -182,7 +215,8 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
             wait = limiters.map { $0.consume(Int(requestEnd - segment.position + 1)) }.max() ?? 0
         }
         let token = UUID()
-        connections[index] = Connection(task: nil, slot: slot, requestEnd: requestEnd, paced: paced, token: token)
+        connections[index] = Connection(task: nil, slot: slot, requestEnd: requestEnd, paced: paced, token: token,
+                                        launchedAt: ProcessInfo.processInfo.systemUptime)
         if wait > 0.001 {
             queue.asyncAfter(deadline: .now() + wait) { [weak self] in
                 guard let self, self.state == .running, self.connections[index]?.token == token else { return }
@@ -274,9 +308,70 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
                                 activeSegments: connections.keys.sorted(), resumable: resumable)
     }
 
+    // MARK: - Adaptive connections
+
+    private func adapt() {
+        guard resumable, !limiting, ceiling > 1 else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let received = segments.reduce(0) { $0 + $1.received }
+        if windowReceived < 0 {
+            // Start measuring once the current connections have had a moment to get going.
+            if now >= windowStart {
+                windowStart = now
+                windowReceived = received
+            }
+            return
+        }
+        let elapsed = now - windowStart
+        guard elapsed >= job.adaptiveWindow else { return }
+        let rate = Double(received - windowReceived) / elapsed
+        windowStart = now
+        windowReceived = received
+
+        if let pending = trial {
+            trial = nil
+            if rate < pending.baseline * 1.1 {
+                trace("\(connectionLimit) connections weren't faster (\(Int(rate)) vs \(Int(pending.baseline)) B/s): back to \(pending.previousLimit)")
+                connectionLimit = pending.previousLimit
+                shedExtraConnections()
+                holdUntil = now + 20
+                windowStart = now + warmup
+                windowReceived = -1
+                return
+            }
+            trace("keeping \(connectionLimit) connections (\(Int(rate)) vs \(Int(pending.baseline)) B/s)")
+        }
+
+        let remaining = totalBytes - received
+        let allBusy = connections.count >= connectionLimit
+        guard allBusy, connectionLimit < ceiling, now >= holdUntil,
+              remaining > Int64(connectionLimit * 2) * job.minSegmentSize * 4 else { return }
+        trial = (connectionLimit, rate)
+        connectionLimit = min(ceiling, connectionLimit + max(2, connectionLimit / 2))
+        trace("trying \(connectionLimit) connections (at \(Int(rate)) B/s)")
+        schedule()
+        // Give the new connections a moment to start before judging them.
+        windowStart = now + warmup
+        windowReceived = -1
+    }
+
+    /// Time for new connections to get going before measuring.
+    private var warmup: TimeInterval { min(1, job.adaptiveWindow) }
+
+    /// Closes the newest connections beyond the limit; their ranges continue later.
+    private func shedExtraConnections() {
+        let extra = connections.count - connectionLimit
+        guard extra > 0 else { return }
+        for (index, connection) in connections.sorted(by: { $0.value.launchedAt > $1.value.launchedAt }).prefix(extra) {
+            release(index)
+            connection.task?.cancel()
+        }
+    }
+
     // MARK: - Failures
 
     private func failSegment(_ index: Int, _ error: Error) {
+        trace("segment \(index) failed: \(describe(error)) [\((error as NSError).code)] at \(segments[index].position)")
         release(index)?.task?.cancel()
         guard state == .running else { return }
         guard isRetryable(error) else { return fail(error) }
@@ -290,10 +385,13 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
     }
 
     private func handleBadStatus(_ index: Int, status: Int) {
+        trace("segment \(index) got HTTP \(status) with \(connections.count) connections")
         if [403, 429, 503].contains(status), connections.count > 1 {
             // The server limits parallel connections: settle for what it tolerates.
             release(index)?.task?.cancel()
-            connectionLimit = max(1, connections.count)
+            ceiling = max(1, connections.count)
+            connectionLimit = min(connectionLimit, ceiling)
+            trial = nil
             coolingUntil[index] = ProcessInfo.processInfo.systemUptime + 2
             queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.schedule() }
             return
@@ -312,7 +410,7 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
         totalBytes = contentLength > 0 ? contentLength : -1
         segments = [Segment(id: 0, start: 0, end: totalBytes > 0 ? totalBytes - 1 : -1)]
         resumable = false
-        connections = [0: Connection(task: task, slot: kept.slot, requestEnd: -1, paced: false, token: kept.token)]
+        connections = [0: Connection(task: task, slot: kept.slot, requestEnd: -1, paced: false, token: kept.token, launchedAt: kept.launchedAt)]
         segmentForTask = [ObjectIdentifier(task): 0]
         failures.removeAll()
         coolingUntil.removeAll()

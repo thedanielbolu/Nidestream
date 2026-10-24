@@ -20,6 +20,7 @@ FILES="$(mktemp -d)"
 trap 'kill "${SERVER:-0}" 2>/dev/null || true; rm -rf "$FILES"' EXIT
 head -c 41943040 /dev/urandom > "$FILES/big.bin"
 head -c 5000000 /dev/urandom > "$FILES/disposition.bin"
+head -c 100663296 /dev/urandom > "$FILES/huge.bin"
 PORT=8799
 python3 scripts/test-server.py "$PORT" "$FILES" &
 SERVER=$!

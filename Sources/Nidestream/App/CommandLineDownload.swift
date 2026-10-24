@@ -28,7 +28,7 @@ enum CommandLineDownload {
                     print("Saving video stream as \((name as NSString).deletingPathExtension)")
                 } else {
                     let size = probe.totalBytes >= 0 ? ByteCountFormatter.string(fromByteCount: probe.totalBytes, countStyle: .file) : "unknown size"
-                    print("Saving \(name) (\(size), \(probe.acceptsRanges ? "resumable, \(connections) connections" : "single connection"))")
+                    print("Saving \(name) (\(size), \(probe.acceptsRanges ? "resumable, up to \(connections) connections" : "single connection"))")
                 }
                 let workDirectory = directory.appendingPathComponent("." + name + ".nidestream-hls", isDirectory: true)
                 let started = Date()

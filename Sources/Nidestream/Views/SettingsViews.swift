@@ -139,7 +139,7 @@ private struct GeneralSettings: View {
                     }
                 }
                 Stepper(value: $settings.prefs.connectionsPerDownload, in: 1...32) {
-                    LabeledContent("Connections per download", value: "\(settings.prefs.connectionsPerDownload)")
+                    LabeledContent("Max connections per download", value: "\(settings.prefs.connectionsPerDownload)")
                 }
                 Stepper(value: $settings.prefs.maxSimultaneous, in: 1...10) {
                     LabeledContent("Downloads at the same time", value: "\(settings.prefs.maxSimultaneous)")

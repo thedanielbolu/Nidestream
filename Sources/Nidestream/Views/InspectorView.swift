@@ -28,6 +28,8 @@ private struct DownloadDetails: View {
     @State private var hashing = false
     @State private var editingAddress = false
     @State private var newAddress = ""
+    @State private var checkingAddress = false
+    @State private var addressProblem: String?
     @State private var showLogin = false
     @State private var username = ""
     @State private var password = ""
@@ -46,8 +48,13 @@ private struct DownloadDetails: View {
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                if record.lastError?.contains("401") == true || record.lastError?.contains("403") == true {
-                    Button("Enter Login…") { showLogin = true }
+                HStack {
+                    if record.kind == .http, record.receivedBytes > 0 {
+                        Button("Change Address…") { beginAddressChange() }
+                    }
+                    if record.lastError?.contains("401") == true || record.lastError?.contains("403") == true {
+                        Button("Enter Login…") { showLogin = true }
+                    }
                 }
             }
             actions
@@ -121,10 +128,7 @@ private struct DownloadDetails: View {
             Menu {
                 Button("Copy Address") { Actions.copyAddresses([item.id]) }
                 if record.status != .completed {
-                    Button("Change Address…") {
-                        newAddress = record.url.absoluteString
-                        editingAddress = true
-                    }
+                    Button("Change Address…") { beginAddressChange() }
                     Button("Login…") {
                         username = record.username ?? ""
                         password = ""
@@ -213,28 +217,61 @@ private struct DownloadDetails: View {
         }
     }
 
+    private func beginAddressChange() {
+        newAddress = record.url.absoluteString
+        addressProblem = nil
+        editingAddress = true
+    }
+
     private var addressSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Change Address").font(.headline)
-            Text("Use this when a link has expired. Progress is kept if the new link serves the same file.")
+            Text("Paste a fresh link to the same file, for example after the old one expired. Nidestream checks it and continues from \(Int(item.progress * 100))% instead of starting over.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             TextField("Address", text: $newAddress)
                 .textFieldStyle(.roundedBorder)
+                .onChange(of: newAddress) { addressProblem = nil }
+            if let addressProblem {
+                Label(addressProblem, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
+                if checkingAddress {
+                    ProgressView().controlSize(.small)
+                    Text("Checking link…").font(.callout).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Cancel") { editingAddress = false }.keyboardShortcut(.cancelAction)
-                Button("Save") {
-                    if let url = URL(string: newAddress.trimmingCharacters(in: .whitespaces)), url.scheme != nil {
-                        DownloadManager.shared.updateAddress(item, to: url)
-                    }
-                    editingAddress = false
-                }
-                .keyboardShortcut(.defaultAction)
+                Button("Continue with This Link") { saveAddress() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(checkingAddress)
             }
         }
         .padding(20)
         .frame(width: 460)
+    }
+
+    private func saveAddress() {
+        guard let url = URL(string: newAddress.trimmingCharacters(in: .whitespaces)),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
+            addressProblem = "Enter a web address starting with http:// or https://."
+            return
+        }
+        checkingAddress = true
+        Task {
+            let result = await DownloadManager.shared.changeAddress(item, to: url)
+            checkingAddress = false
+            switch result {
+            case .continued, .replaced:
+                editingAddress = false
+            case .rejected(let reason):
+                addressProblem = reason
+            }
+        }
     }
 
     private var loginSheet: some View {
