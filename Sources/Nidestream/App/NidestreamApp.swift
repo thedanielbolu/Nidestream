@@ -87,12 +87,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()
         menu.addItem(withTitle: "New Download…", action: #selector(dockAdd), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Add Links…", action: #selector(dockAddLinks), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Resume All", action: #selector(dockResumeAll), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Pause All", action: #selector(dockPauseAll), keyEquivalent: "").target = self
         return menu
     }
 
     @objc private func dockAdd() { MainActor.assumeIsolated { WindowPresenter.showAdd() } }
+    @objc private func dockAddLinks() { MainActor.assumeIsolated { WindowPresenter.showAddLinks() } }
     @objc private func dockResumeAll() { MainActor.assumeIsolated { DownloadManager.shared.resumeAll() } }
     @objc private func dockPauseAll() { MainActor.assumeIsolated { DownloadManager.shared.pauseAll() } }
 
@@ -119,6 +121,8 @@ struct AppCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Download…") { WindowPresenter.showAdd() }
                 .keyboardShortcut("n")
+            Button("Add Links…") { WindowPresenter.showAddLinks() }
+                .keyboardShortcut("l")
             Button("Batch Download…") { WindowPresenter.showBatch() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             Button("Site Grabber…") { WindowPresenter.showGrabber() }

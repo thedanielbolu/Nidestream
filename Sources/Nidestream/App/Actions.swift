@@ -183,6 +183,10 @@ enum WindowPresenter {
         }
     }
 
+    static func showAddLinks() {
+        present(key: "add-links", title: "Add Links") { close in AddLinksView(close: close) }
+    }
+
     static func showBatch() {
         present(key: "batch", title: "Batch Download") { close in BatchDownloadView(close: close) }
     }

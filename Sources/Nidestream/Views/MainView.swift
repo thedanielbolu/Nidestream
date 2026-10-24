@@ -91,7 +91,8 @@ private struct MainToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             Menu {
-                Button("New Download…", systemImage: "link") { WindowPresenter.showAdd() }
+                Button("New Download…", systemImage: "plus") { WindowPresenter.showAdd() }
+                Button("Add Links…", systemImage: "link") { WindowPresenter.showAddLinks() }
                 Button("Batch Download…", systemImage: "square.stack.3d.down.right") { WindowPresenter.showBatch() }
                 Button("Site Grabber…", systemImage: "globe") { WindowPresenter.showGrabber() }
                 Divider()
@@ -102,6 +103,12 @@ private struct MainToolbar: ToolbarContent {
                 WindowPresenter.showAdd()
             }
             .help("New download (⌘N)")
+        }
+        ToolbarItem(placement: .navigation) {
+            Button { WindowPresenter.showAddLinks() } label: {
+                Label("Add Links", systemImage: "link")
+            }
+            .help("Add links: paste one or more (⌘L)")
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button { Actions.resume(ui.selection) } label: { Label("Resume", systemImage: "play.fill") }

@@ -80,6 +80,15 @@ final class DownloadManager {
         Persistence.saveDownloads(items.map(\.record), synchronously: true)
     }
 
+    /// Shows sample downloads without loading, saving or running anything. Only for `--render-ui`.
+    func showPreview(_ samples: [(record: DownloadRecord, speed: Double)]) {
+        items = samples.map { sample in
+            let item = DownloadItem(record: sample.record)
+            item.speed = sample.speed
+            return item
+        }
+    }
+
     // MARK: - Adding
 
     @discardableResult
