@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy policy · Nidestream</title>
+  <meta name="description" content="Nidestream does not collect, sell or share your data. The browser extension talks only to the Nidestream app on your own Mac.">
+  <link rel="icon" href="assets/icon.png">
+  <link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+  <header class="site">
+    <div class="wrap">
+      <img src="assets/icon.png" alt="">
+      <a class="brand" href="./">Nidestream</a>
+      <nav>
+        <a href="./#download">Download</a>
+        <a href="./#extension">Browser extension</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="https://github.com/thedanielbolu/Nidestream">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="doc">
+    <h1>Privacy policy</h1>
+    <p class="updated">Last updated: October 24, 2026</p>
+
+    <p>Nidestream is a download manager for macOS. It has two parts: the <strong>Nidestream app</strong> and the
+      <strong>Nidestream Integration</strong> browser extension for Chrome, Firefox and other browsers.</p>
+
+    <h2>The short version</h2>
+    <p>Nidestream does not collect, sell or share your data. There are no accounts, no analytics and no tracking.
+      Everything the browser extension handles goes only to the Nidestream app on your own Mac.</p>
+
+    <h2>What the browser extension handles, and why</h2>
+    <p>When you download something, or choose a Nidestream option from the right-click menu, the extension passes the
+      following to the Nidestream app running on the same computer (over the local address <code>127.0.0.1</code>,
+      which never leaves your Mac):</p>
+    <ul>
+      <li>the address of the file, and the address and title of the page it came from;</li>
+      <li>the file's name, size and type, as reported by the browser;</li>
+      <li>the cookies the browser holds for the file's address, so downloads that need you to be signed in still work;</li>
+      <li>your browser's user agent string, so the server sends the same file it would send the browser.</li>
+    </ul>
+    <p>To show videos you can download, the extension notes the address, type and size of video and audio files that
+      pages load, for the tab you're on. It never reads their contents. This list is kept in the browser's temporary
+      storage and cleared when you leave the page.</p>
+    <p>The extension sends nothing to the developer or to any other server.</p>
+
+    <h2>What the app stores</h2>
+    <p>The Nidestream app keeps your download list (addresses, file names, progress, and the cookies needed to resume
+      unfinished downloads) in <code>~/Library/Application Support/Nidestream</code> on your Mac, readable only by your
+      user account. Cookies are deleted from the list when a download finishes. Passwords you enter for sites are
+      stored in your macOS Keychain. Removing a download removes its data.</p>
+    <p>The app connects to the internet only to download the files you ask for, using the addresses you gave it.</p>
+
+    <h2>Changes</h2>
+    <p>If this policy changes, the new version will be published at this address with a new date.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about privacy: <a href="https://github.com/thedanielbolu/Nidestream/issues">open an issue on GitHub</a>.</p>
+  </main>
+
+  <footer class="site">
+    <div class="wrap">
+      <span>Nidestream</span>
+      <a href="./">Home</a>
+      <a href="https://github.com/thedanielbolu/Nidestream">Source code</a>
+      <a href="https://github.com/thedanielbolu/Nidestream/issues">Report a problem</a>
+    </div>
+  </footer>
+</body>
+</html>

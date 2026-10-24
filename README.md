@@ -40,18 +40,32 @@ scripts/build-app.sh
 open build/Nidestream.app
 ```
 
-`scripts/build-app.sh --install` also copies the app to `/Applications`. The app is ad-hoc signed,
+`scripts/build-app.sh --install` also copies the app to `/Applications`. `scripts/make-dmg.sh` builds
+`build/Nidestream.dmg`, the installer for GitHub Releases, with a universal app for Apple silicon and Intel.
+The website in `docs/` (download page and privacy policy) and the release steps are described in
+[docs/store/PUBLISHING.md](docs/store/PUBLISHING.md). The app is ad-hoc signed,
 which is fine for your own Mac. To distribute it, sign it with a Developer ID and notarize it.
 
 ## Install the browser extension
 
-1. Open Nidestream, then **Settings → Browser → Show Extension Folder**. The folder is
-   `~/Library/Application Support/Nidestream/BrowserExtension`.
-2. **Chrome, Edge, Brave, Arc, Vivaldi, Opera:** open the Extensions page (`chrome://extensions`),
-   turn on **Developer mode**, click **Load unpacked** and choose that folder.
-3. **Firefox:** open `about:debugging` → **This Firefox** → **Load Temporary Add-on…** and choose
-   `manifest.json` in that folder. Temporary add-ons are removed when Firefox quits. For a permanent
-   install, sign the extension at addons.mozilla.org.
+Nidestream opens **Connect Your Browsers** on launch until a browser has connected (also under
+**Settings → Browser → Set Up Browsers…**, or by clicking the status bar). It lists your installed
+browsers, shows which ones are connected, and opens each browser's extensions page for you.
+
+1. **Chrome, Edge, Brave, Vivaldi, Opera:** click **Open Extensions Page**, turn on **Developer mode**,
+   then drag the **BrowserExtension** folder from the Finder window onto the page (or click
+   **Load unpacked** and choose `~/Library/Application Support/Nidestream/BrowserExtension`).
+2. **Firefox:** click **Open Add-ons Page**, then **Load Temporary Add-on…** and choose `manifest.json`
+   in that folder. Temporary add-ons are removed when Firefox quits. For a permanent install, sign the
+   extension at addons.mozilla.org.
+
+To publish the extension on the Chrome Web Store and Firefox Add-ons, see
+[docs/store/PUBLISHING.md](docs/store/PUBLISHING.md): `scripts/package-extensions.sh` builds the store
+packages and `scripts/make-store-images.sh` the store images.
+
+The extension takes over downloads whose file type is on the list (Settings → File Types), deciding by
+the real file name the server sends, so links like `download?id=42` are caught too. IDM installs its
+extension from the Chrome Web Store; publishing this one there would make it a one-click install.
 
 The extension talks to the app over `http://127.0.0.1:51515`. The app only listens on the loopback
 address and rejects requests from web pages (by `Origin`), DNS-rebinding attempts (by `Host`) and

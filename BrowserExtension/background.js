@@ -124,11 +124,12 @@ function shouldCapture(item) {
   return !ext && BINARY_MIME.test(item.mime || "");
 }
 
-chrome.downloads.onCreated.addListener(async (item) => {
+// Downloads whose file name Chrome hadn't worked out yet (links like /download?id=42).
+// They're decided again once the real name is known.
+const undecided = new Map();
+
+async function takeOver(item) {
   const url = item.finalUrl || item.url;
-  if (bypass.has(url)) { bypass.delete(url); return; }
-  // Load the app's file-type list before deciding (the worker may have just started).
-  if (!(await refresh()) || !shouldCapture(item)) return;
   try { await chrome.downloads.cancel(item.id); } catch {}
   try { await chrome.downloads.erase({ id: item.id }); } catch {}
   try {
@@ -144,7 +145,45 @@ chrome.downloads.onCreated.addListener(async (item) => {
     bypass.add(url);
     chrome.downloads.download({ url });
   }
+}
+
+chrome.downloads.onCreated.addListener(async (item) => {
+  const url = item.finalUrl || item.url;
+  if (bypass.has(url)) { bypass.delete(url); return; }
+  // Load the app's file-type list before deciding (the worker may have just started).
+  if (!(await refresh())) return;
+  if (shouldCapture(item)) return takeOver(item);
+  if (!item.filename && /^https?:/i.test(url)) {
+    undecided.set(item.id, item);
+    setTimeout(() => undecided.delete(item.id), 60000);
+  }
 });
+
+chrome.downloads.onChanged.addListener(async (delta) => {
+  const item = undecided.get(delta.id);
+  if (!item || !delta.filename?.current) return;
+  undecided.delete(delta.id);
+  item.filename = delta.filename.current;
+  if (shouldCapture(item) && (await refresh(true))) await takeOver(item);
+});
+
+// Tell the app which browser this is, so it can show that the extension is connected.
+async function browserName() {
+  try { if (navigator.brave && (await navigator.brave.isBrave())) return "Brave"; } catch {}
+  const brands = (navigator.userAgentData?.brands || []).map((b) => b.brand);
+  for (const [brand, name] of [["Microsoft Edge", "Edge"], ["Opera", "Opera"], ["Vivaldi", "Vivaldi"], ["Google Chrome", "Chrome"], ["Chromium", "Chromium"]]) {
+    if (brands.includes(brand)) return name;
+  }
+  return /Firefox\//.test(navigator.userAgent) ? "Firefox" : "Browser";
+}
+
+async function announce() {
+  try {
+    await call("/hello", { browser: await browserName(), version: chrome.runtime.getManifest().version });
+    online = true;
+  } catch {}
+}
+announce();
 
 // ---------------------------------------------------------------------------
 // Context menus
@@ -157,8 +196,8 @@ function createMenus() {
     chrome.contextMenus.create({ id: "nidestream-page", title: "Download all links with Nidestream", contexts: ["page"] });
   });
 }
-chrome.runtime.onInstalled.addListener(createMenus);
-chrome.runtime.onStartup.addListener(createMenus);
+chrome.runtime.onInstalled.addListener(() => { createMenus(); announce(); });
+chrome.runtime.onStartup.addListener(() => { createMenus(); announce(); });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {

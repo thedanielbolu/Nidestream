@@ -4,7 +4,8 @@ Serves files from ROOT with Range/If-Range support and a per-connection speed ca
 multi-connection speedups are visible), a /norange/ prefix that ignores Range headers,
 a /mirror/ prefix that serves the same files with a different ETag (like another CDN node),
 a /shared/ prefix where all connections share one SHARED_RATE cap (so extra connections don't help),
-and /sha256/<name> with the expected checksum.
+/get?f=<name>, which serves a file from an address without a file extension, naming it only in
+Content-Disposition (like many "download?id=…" links), and /sha256/<name> with the expected checksum.
 
     python3 scripts/test-server.py [port] [root]
 """
@@ -22,6 +23,11 @@ class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
         path = self.path.split("?")[0]
+        attachment = None
+        if path == "/get":
+            from urllib.parse import parse_qs, urlparse
+            attachment = parse_qs(urlparse(self.path).query).get("f", [""])[0]
+            path = "/" + attachment
         norange = path.startswith("/norange/")
         if norange: path = path[len("/norange"):]
         mirror = path.startswith("/mirror/")
@@ -53,10 +59,12 @@ class H(http.server.BaseHTTPRequestHandler):
                 status = 206
         self.send_response(status)
         ctype = "application/vnd.apple.mpegurl" if fp.endswith(".m3u8") else "application/octet-stream"
+        if attachment: ctype = "application/x-nidestream-test"
         self.send_header("Content-Type", ctype)
         self.send_header("ETag", etag)
         if not norange: self.send_header("Accept-Ranges", "bytes")
         if status == 206: self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
+        if attachment: self.send_header("Content-Disposition", 'attachment; filename="%s"' % attachment)
         if path.endswith("disposition.bin"): self.send_header("Content-Disposition", "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9%20final.bin")
         self.send_header("Content-Length", str(end - start + 1))
         self.end_headers()

@@ -3,23 +3,26 @@
 #   scripts/build-app.sh            release build
 #   scripts/build-app.sh debug      debug build
 #   scripts/build-app.sh --install  release build, then copy to /Applications
+#   scripts/build-app.sh --universal  one app for Apple silicon and Intel Macs
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG=release
 INSTALL=0
+ARCHS=()
 for arg in "$@"; do
   case "$arg" in
     debug|release) CONFIG="$arg" ;;
     --install) INSTALL=1 ;;
+    --universal) ARCHS=(--arch arm64 --arch x86_64) ;;
   esac
 done
 
 source scripts/env.sh
 
 echo "› Building ($CONFIG)…"
-swift build -c "$CONFIG" --product Nidestream
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/Nidestream"
+swift build -c "$CONFIG" --product Nidestream ${ARCHS[@]+"${ARCHS[@]}"}
+BIN="$(swift build -c "$CONFIG" ${ARCHS[@]+"${ARCHS[@]}"} --show-bin-path)/Nidestream"
 
 if [[ ! -f build/icons/AppIcon.icns ]]; then
   echo "› Drawing icons…"

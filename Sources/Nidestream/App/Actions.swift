@@ -203,6 +203,10 @@ enum WindowPresenter {
         }
     }
 
+    static func showBrowserSetup() {
+        present(key: "browser-setup", title: "Connect Your Browsers") { close in BrowserSetupView(close: close) }
+    }
+
     static func showCountdown(_ action: PostQueueAction) {
         present(key: "countdown", title: "Queue Finished") { close in CountdownView(action: action, close: close) }
     }

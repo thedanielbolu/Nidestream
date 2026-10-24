@@ -217,14 +217,17 @@ private struct BrowserSettings: View {
                     Label(bridge.message, systemImage: bridge.listening ? "checkmark.circle.fill" : "xmark.octagon.fill")
                         .foregroundStyle(bridge.listening ? .green : .red)
                 }
-                if let contact = bridge.lastContact {
-                    LabeledContent("Extension last seen", value: contact.formatted(.relative(presentation: .named)))
+                LabeledContent("Connected browsers") {
+                    let seen = ExtensionStatus.shared.lastSeen
+                    Text(seen.isEmpty ? "None yet" : seen.keys.sorted().joined(separator: ", "))
+                        .foregroundStyle(seen.isEmpty ? .orange : .secondary)
                 }
                 Toggle("Take over downloads from the browser", isOn: $settings.prefs.browserCapture)
                 Toggle("Show the download dialog first", isOn: $settings.prefs.showDialogForBrowser)
                 TextField("Skip files smaller than (KB)", value: $settings.prefs.minCaptureSizeKB, format: .number)
             }
             Section("Install the extension") {
+                Button("Set Up Browsers…") { WindowPresenter.showBrowserSetup() }
                 Text("Works with Chrome, Edge, Brave, Arc, Vivaldi, Opera and Firefox.")
                 VStack(alignment: .leading, spacing: 6) {
                     Text("**Chrome and other Chromium browsers:** open the Extensions page, turn on Developer mode, click “Load unpacked” and pick the extension folder.")

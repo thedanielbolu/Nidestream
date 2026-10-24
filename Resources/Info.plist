@@ -44,7 +44,7 @@
 		<true/>
 	</dict>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Nidestream asks System Events to shut down your Mac when a scheduled download queue finishes, if you turn that on.</string>
+	<string>Nidestream opens your browser's extensions page when you set up the browser extension, and asks System Events to shut down your Mac after a scheduled download queue if you turn that on.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSPrincipalClass</key>

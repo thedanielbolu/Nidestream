@@ -49,12 +49,49 @@ final class BrowserBridge: @unchecked Sendable {
             case .complete(let request):
                 DispatchQueue.main.async {
                     let response = MainActor.assumeIsolated { BridgeRouter.handle(request) }
+                    BridgeLog.record(request, status: response.status)
                     connection.send(content: response.serialized(), completion: .contentProcessed { _ in connection.cancel() })
                 }
             case .incomplete where !isComplete && error == nil:
                 self.receive(on: connection, buffer: buffer)
             default:
+                if !buffer.isEmpty { BridgeLog.write("unreadable request (\(buffer.count) bytes)") }
                 connection.cancel()
+            }
+        }
+    }
+}
+
+/// One line per request the browser bridge receives (no bodies, cookies or URLs of downloads),
+/// so "the extension isn't taking downloads" can be diagnosed: ~/Library/Logs/Nidestream/bridge.log
+enum BridgeLog {
+    private static let queue = DispatchQueue(label: "nidestream.bridge-log")
+    static var file: URL {
+        FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Logs/Nidestream/bridge.log")
+    }
+
+    static func record(_ request: HTTPRequest, status: Int) {
+        let origin = request.headers["origin"] ?? "-"
+        let host = request.headers["host"] ?? "-"
+        let preflight = request.headers["access-control-request-private-network"] != nil ? " private-network-preflight" : ""
+        write("\(request.method) \(request.path) origin=\(origin) host=\(host)\(preflight) → \(status)")
+    }
+
+    static func write(_ line: String) {
+        let stamped = ISO8601DateFormatter().string(from: Date()) + " " + line + "\n"
+        queue.async {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let size = (try? fm.attributesOfItem(atPath: file.path))?[.size] as? Int, size > 1_000_000 {
+                try? fm.removeItem(at: file)
+            }
+            if let handle = try? FileHandle(forWritingTo: file) {
+                handle.seekToEndOfFile()
+                handle.write(Data(stamped.utf8))
+                try? handle.close()
+            } else {
+                try? Data(stamped.utf8).write(to: file)
             }
         }
     }
@@ -94,6 +131,11 @@ private struct AddPayload: Decodable {
     var mime: String?
     var pageTitle: String?
     var kind: String?
+}
+
+private struct HelloPayload: Decodable {
+    var browser: String
+    var version: String?
 }
 
 private struct LinksPayload: Decodable {
@@ -153,6 +195,10 @@ enum BridgeRouter {
             case "/links":
                 guard let payload = try? decoder.decode(LinksPayload.self, from: request.body) else { return .json(["ok": false], status: 400, headers: cors) }
                 return links(payload) ? .json(["ok": true], headers: cors) : .json(["ok": false], status: 400, headers: cors)
+            case "/hello":
+                guard let payload = try? decoder.decode(HelloPayload.self, from: request.body) else { return .json(["ok": false], status: 400, headers: cors) }
+                ExtensionStatus.shared.record(String(payload.browser.prefix(40)))
+                return .json(["ok": true, "version": appVersion], headers: cors)
             default:
                 return HTTPResponse(status: 404, headers: cors)
             }

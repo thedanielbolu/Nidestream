@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Nidestream store screenshot</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    width: 1280px; height: 800px; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    background: linear-gradient(160deg, #eef9ff 0%, #cdebff 55%, #a5d9ff 100%);
+    color: #10233d;
+  }
+  .pitch { position: absolute; left: 72px; top: 150px; width: 380px; }
+  .pitch img { width: 112px; height: 112px; }
+  .pitch h1 { font-size: 40px; line-height: 1.12; margin: 22px 0 18px; letter-spacing: -0.02em; }
+  .pitch ul { list-style: none; padding: 0; font-size: 19px; line-height: 1.45; color: #2a4466; }
+  .pitch li { padding-left: 30px; position: relative; margin-bottom: 12px; }
+  .pitch li::before { content: ""; position: absolute; left: 0; top: 7px; width: 16px; height: 16px; border-radius: 50%; background: #2b93ec; }
+  .note { margin-top: 26px; font-size: 14px; color: #4e6a8c; }
+
+  .browser {
+    position: absolute; left: 500px; top: 96px; width: 720px; height: 600px;
+    background: #fff; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 30px 60px rgba(10, 60, 120, 0.25), 0 0 0 1px rgba(10, 60, 120, 0.08);
+  }
+  .bar { height: 52px; background: #f1f3f6; border-bottom: 1px solid #dde2ea; display: flex; align-items: center; padding: 0 16px; gap: 10px; }
+  .dots span { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; }
+  .address { flex: 1; height: 30px; border-radius: 15px; background: #fff; border: 1px solid #dde2ea; font-size: 13px; color: #5b6575; display: flex; align-items: center; padding: 0 14px; }
+  .ext-icon { width: 28px; height: 28px; border-radius: 7px; background: #e3f2ff; display: grid; place-items: center; position: relative; }
+  .ext-icon img { width: 18px; height: 18px; }
+  .badge { position: absolute; right: -5px; bottom: -4px; background: #1a7fd6; color: #fff; font-size: 10px; font-weight: 700; border-radius: 8px; padding: 1px 5px; }
+
+  .page { padding: 26px 30px; }
+  .page h2 { font-size: 22px; margin-bottom: 6px; }
+  .page p { font-size: 14px; color: #5b6575; margin-bottom: 18px; }
+  .video {
+    width: 340px; height: 191px; border-radius: 10px; position: relative;
+    background: radial-gradient(circle at 30% 30%, #3d6da8, #142a4a 70%);
+  }
+  .play { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; background: rgba(255,255,255,0.85); }
+  .play::after { content: ""; position: absolute; left: 26px; top: 20px; border-left: 18px solid #142a4a; border-top: 12px solid transparent; border-bottom: 12px solid transparent; }
+  /* The extension's real in-page button (content.js). */
+  .dl-button {
+    position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px 6px 9px;
+    font: 600 12px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; color: #fff;
+    background: rgba(26, 127, 214, 0.94); border: 1px solid rgba(255,255,255,0.25); border-radius: 999px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+  }
+  .dl-button svg { width: 14px; height: 14px; }
+  .files { margin-top: 18px; font-size: 14px; color: #1a7fd6; line-height: 1.9; }
+
+  /* The extension's popup (popup.html / popup.css), with sample data. */
+  .popup {
+    position: absolute; right: 18px; top: 46px; width: 300px; padding: 14px;
+    background: #fff; border-radius: 12px; font-size: 13px; color: #1d1d1f;
+    box-shadow: 0 18px 40px rgba(10, 40, 90, 0.28), 0 0 0 1px rgba(0,0,0,0.06);
+  }
+  .popup header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .popup header img { width: 36px; height: 36px; }
+  .popup h1 { font-size: 15px; }
+  .ok { color: #1f9d55; }
+  .toggle { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 8px; background: #f5f5f7; }
+  .toggle i { width: 14px; height: 14px; border-radius: 3px; background: #1a7fd6; display: inline-block; }
+  .popup h2 { margin: 14px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #6e6e73; }
+  .popup li { display: flex; align-items: center; gap: 8px; padding: 7px 4px; border-bottom: 1px solid #e5e5ea; list-style: none; }
+  .popup li:last-child { border-bottom: none; }
+  .tag { font-size: 10px; font-weight: 700; padding: 2px 5px; border-radius: 4px; background: #1a7fd6; color: #fff; }
+  .info { flex: 1; min-width: 0; }
+  .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { font-size: 11px; color: #6e6e73; }
+  .send { font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 6px; border: 1px solid #1a7fd6; background: #1a7fd6; color: #fff; }
+  .all { margin-top: 10px; width: 100%; font: inherit; padding: 6px; border-radius: 6px; border: 1px solid #e5e5ea; background: #f5f5f7; }
+</style>
+</head>
+<body>
+  <div class="pitch">
+    <img src="icon.png" alt="">
+    <h1>Downloads go straight to Nidestream</h1>
+    <ul>
+      <li>Browser downloads hand over automatically</li>
+      <li>Grab videos and streams from any page</li>
+      <li>Download all links on a page at once</li>
+      <li>Faster, resumable downloads on your Mac</li>
+    </ul>
+    <p class="note">Requires the free Nidestream app for macOS.</p>
+  </div>
+
+  <div class="browser">
+    <div class="bar">
+      <div class="dots"><span style="background:#ff5f57"></span><span style="background:#febc2e"></span><span style="background:#28c840"></span></div>
+      <div class="address">media.example.com/videos/sunrise-timelapse</div>
+      <div class="ext-icon"><img src="icon.png" alt=""><span class="badge">2</span></div>
+    </div>
+    <div class="page">
+      <h2>Sunrise timelapse</h2>
+      <p>4K footage · 3 minutes</p>
+      <div class="video">
+        <div class="play"></div>
+        <span class="dl-button">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 13h10"/></svg>
+          Download video
+        </span>
+      </div>
+      <div class="files">sunrise-timelapse-4k.mp4<br>sunrise-timelapse-1080p.mp4<br>footage-license.pdf</div>
+    </div>
+    <div class="popup">
+      <header>
+        <img src="icon.png" alt="">
+        <div><h1>Nidestream</h1><p class="ok">Connected to the app</p></div>
+      </header>
+      <div class="toggle"><i></i><span>Take over downloads from this browser</span></div>
+      <h2>Media on this page</h2>
+      <ul style="padding:0">
+        <li><span class="tag">HLS</span><div class="info"><div class="name">master.m3u8</div><div class="meta">Video stream</div></div><span class="send">Download</span></li>
+        <li><span class="tag">MP4</span><div class="info"><div class="name">sunrise-timelapse-4k.mp4</div><div class="meta">video/mp4 · 412 MB</div></div><span class="send">Download</span></li>
+      </ul>
+      <button class="all">Download all links on this page…</button>
+    </div>
+  </div>
+</body>
+</html>

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Nidestream Integration",
   "short_name": "Nidestream",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Send downloads, links and videos to the Nidestream download manager for macOS.",
   "icons": {
     "16": "icons/icon16.png",

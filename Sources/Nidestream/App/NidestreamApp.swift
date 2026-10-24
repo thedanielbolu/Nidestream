@@ -48,6 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             Scheduler.shared.start()
             Notifier.setUp(delegate: self)
             ExtensionInstaller.sync()
+            // Like IDM's installer, make sure the browser hookup isn't missed: until some browser
+            // has connected, offer the setup assistant once per launch.
+            if !ExtensionStatus.shared.isConnected {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    MainActor.assumeIsolated {
+                        if !ExtensionStatus.shared.isConnected { WindowPresenter.showBrowserSetup() }
+                    }
+                }
+            }
         }
     }
 

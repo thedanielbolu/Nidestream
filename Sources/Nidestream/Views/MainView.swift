@@ -356,6 +356,7 @@ private struct StatusBarView: View {
     private var manager: DownloadManager { .shared }
     private var settings: SettingsStore { .shared }
     private var bridge: BridgeStatus { .shared }
+    private var extensions: ExtensionStatus { .shared }
 
     var body: some View {
         HStack(spacing: 14) {
@@ -371,10 +372,24 @@ private struct StatusBarView: View {
                 Label("Queue running", systemImage: "list.bullet.circle").foregroundStyle(Color.accentColor)
             }
             Spacer()
-            Label(bridge.listening ? "Browser integration on" : "Browser integration off",
-                  systemImage: bridge.listening ? "puzzlepiece.extension.fill" : "puzzlepiece.extension")
-                .foregroundStyle(bridge.listening ? Color.secondary : Color.red)
-                .help(bridge.message)
+            if !bridge.listening {
+                Label("Browser integration off", systemImage: "puzzlepiece.extension")
+                    .foregroundStyle(.red)
+                    .help(bridge.message)
+            } else if extensions.isConnected {
+                Button { WindowPresenter.showBrowserSetup() } label: {
+                    Label("Browser extension connected", systemImage: "puzzlepiece.extension.fill")
+                }
+                .buttonStyle(.plain)
+                .help("Connected: " + extensions.lastSeen.keys.sorted().joined(separator: ", "))
+            } else {
+                Button { WindowPresenter.showBrowserSetup() } label: {
+                    Label("Set up browser extension…", systemImage: "puzzlepiece.extension")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.orange)
+                .help("Downloads stay in the browser until the extension is added")
+            }
         }
         .font(.callout)
         .foregroundStyle(.secondary)
