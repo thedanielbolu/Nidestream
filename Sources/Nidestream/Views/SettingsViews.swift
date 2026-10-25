@@ -223,7 +223,7 @@ private struct BrowserSettings: View {
                         .foregroundStyle(seen.isEmpty ? .orange : .secondary)
                 }
                 Toggle("Take over downloads from the browser", isOn: $settings.prefs.browserCapture)
-                Toggle("Show the download dialog first", isOn: $settings.prefs.showDialogForBrowser)
+                Toggle("Ask before starting browser downloads", isOn: $settings.prefs.askBeforeBrowserDownloads)
                 TextField("Skip files smaller than (KB)", value: $settings.prefs.minCaptureSizeKB, format: .number)
             }
             Section("Install the extension") {

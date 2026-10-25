@@ -235,10 +235,11 @@ enum BridgeRouter {
         if isHLS, new.fileName == nil, let title = payload.pageTitle, !title.isEmpty {
             new.fileName = HTTPHeaderParsing.sanitizeFileName(title) + ".mp4"
         }
-        if prefs.showDialogForBrowser {
+        if prefs.askBeforeBrowserDownloads {
             WindowPresenter.showAdd(new)
         } else {
-            DownloadManager.shared.add(new, start: true)
+            let item = DownloadManager.shared.add(new, start: true)
+            DownloadToast.show(fileName: item.record.fileName, size: item.record.totalBytes)
         }
         return true
     }

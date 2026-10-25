@@ -164,6 +164,7 @@ enum Actions {
 enum WindowPresenter {
     private static var windows: [String: NSWindow] = [:]
     private static var observers: [String: NSObjectProtocol] = [:]
+    private static var floatObservers: [ObjectIdentifier: NSObjectProtocol] = [:]
 
     static func showMain() {
         NSApp.activate()
@@ -217,9 +218,8 @@ enum WindowPresenter {
 
     private static func present<Content: View>(key: String, title: String, resizable: Bool = false,
                                                @ViewBuilder content: (_ close: @escaping () -> Void) -> Content) {
-        NSApp.activate()
         if let existing = windows[key] {
-            existing.makeKeyAndOrderFront(nil)
+            bringForward(existing)
             return
         }
         var style: NSWindow.StyleMask = [.titled, .closable]
@@ -227,7 +227,7 @@ enum WindowPresenter {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 400), styleMask: style, backing: .buffered, defer: false)
         window.title = title
         window.isReleasedWhenClosed = false
-        window.collectionBehavior = [.fullScreenAuxiliary]
+        window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
         let close: () -> Void = { [weak window] in window?.close() }
         let host = NSHostingController(rootView: content(close))
         host.sizingOptions = [.preferredContentSize]
@@ -240,6 +240,24 @@ enum WindowPresenter {
                 if let observer = observers.removeValue(forKey: key) { NotificationCenter.default.removeObserver(observer) }
             }
         }
+        bringForward(window)
+    }
+
+    /// macOS no longer lets an app in the background take focus, so a window opened while you're in
+    /// the browser would land behind it. Float it above other apps until you click it.
+    private static func bringForward(_ window: NSWindow) {
+        if !NSApp.isActive, floatObservers[ObjectIdentifier(window)] == nil {
+            window.level = .floating
+            let id = ObjectIdentifier(window)
+            floatObservers[id] = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated {
+                    window.level = .normal
+                    if let observer = floatObservers.removeValue(forKey: id) { NotificationCenter.default.removeObserver(observer) }
+                }
+            }
+        }
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSApp.activate()
     }
 }

@@ -25,6 +25,8 @@ enum UIRender {
             render(MenuBarView(tab: .finished), dark: dark, to: folder.appendingPathComponent("widget-finished-\(mode).png"))
             DownloadManager.shared.showPreview([])
             render(MenuBarView(tab: .downloads), dark: dark, to: folder.appendingPathComponent("widget-empty-\(mode).png"))
+            render(ToastView(names: ["tfpdl-trnr2672wd.mkv"], size: 876_727_979, open: {}), dark: dark,
+                   to: folder.appendingPathComponent("toast-\(mode).png"))
             render(AddLinksView(close: {}, initialText: "https://example.com/releases/app-2.4.dmg\nCheck these too: https://example.com/docs/manual.pdf and https://example.com/media/intro.mp4\n"),
                    dark: dark, to: folder.appendingPathComponent("add-links-\(mode).png"))
         }

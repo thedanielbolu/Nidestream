@@ -55,7 +55,8 @@ struct Preferences: Codable, Equatable {
     var resumeOnLaunch = false
     var showMenuBarIcon = true
     var browserCapture = true
-    var showDialogForBrowser = true
+    /// Browser downloads start right away, like IDM; turn this on to see the download dialog first.
+    var askBeforeBrowserDownloads = false
     var minCaptureSizeKB = 0
     var captureExtensions = defaultCaptureExtensions
     var remuxToMP4 = true
