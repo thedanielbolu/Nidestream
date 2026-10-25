@@ -11,9 +11,10 @@ enum DownloadToast {
     private static var hideWork: DispatchWorkItem?
     private static var recent: [String] = []
 
-    static func show(fileName: String, size: Int64) {
-        recent.append(fileName)
-        let view = ToastView(names: recent, size: recent.count == 1 && size > 0 ? size : nil) {
+    /// `title` replaces "Downloading in Nidestream", for example "Already downloaded".
+    static func show(fileName: String, size: Int64, title: String? = nil) {
+        if title == nil { recent.append(fileName) } else { recent = [fileName] }
+        let view = ToastView(names: recent, size: recent.count == 1 && size > 0 ? size : nil, title: title) {
             WindowPresenter.showMain()
             hide()
         }
@@ -67,6 +68,7 @@ enum DownloadToast {
 struct ToastView: View {
     let names: [String]
     let size: Int64?
+    var title: String? = nil
     let open: () -> Void
 
     var body: some View {
@@ -75,7 +77,7 @@ struct ToastView: View {
                 .resizable()
                 .frame(width: 38, height: 38)
             VStack(alignment: .leading, spacing: 2) {
-                Text(names.count == 1 ? "Downloading in Nidestream" : "Downloading \(names.count) files in Nidestream")
+                Text(title ?? (names.count == 1 ? "Downloading in Nidestream" : "Downloading \(names.count) files in Nidestream"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.brand)
                 Text(names.last ?? "")

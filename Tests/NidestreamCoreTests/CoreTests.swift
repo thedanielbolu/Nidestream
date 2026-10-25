@@ -242,6 +242,13 @@ enum CCCryptShim {
         #expect(!LinkRefresh.isSameFile(done, as: probe("setup.zip", total: 5000)))
     }
 
+    @Test func sameFileNameIgnoresCaseAndCopyNumber() {
+        #expect(LinkRefresh.sameFileName("Movie (1).mkv", "movie.mkv"))
+        #expect(LinkRefresh.sameFileName("README", "readme (2)"))
+        #expect(!LinkRefresh.sameFileName("movie.mkv", "movie.mp4"))
+        #expect(!LinkRefresh.sameFileName("movie 1.mkv", "movie.mkv"))
+    }
+
     @Test func refreshKeepsProgressAndTakesNewFingerprint() {
         let old = record("setup.zip", total: 5000, received: 2500)
         let url = URL(string: "https://cdn2.example.com/b?token=fresh")!

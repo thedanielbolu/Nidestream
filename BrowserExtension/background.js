@@ -140,6 +140,7 @@ async function takeOver(item) {
       fileSize: item.totalBytes || item.fileSize,
       mime: item.mime,
     });
+    markSent(url, item.url);
   } catch {
     // Hand it back to the browser rather than losing the download.
     bypass.add(url);
@@ -321,6 +322,30 @@ function mediaFor(tabId) {
   return [...(media.get(tabId)?.values() || [])];
 }
 
+// A file the browser started downloading is also seen here as media; once Nidestream has it, the
+// popup shouldn't offer it as new.
+function markSent(...urls) {
+  let changed = false;
+  for (const items of media.values()) {
+    for (const item of items.values()) {
+      if (urls.includes(item.url) && !item.sent) { item.sent = true; changed = true; }
+    }
+  }
+  if (changed) persistMedia();
+}
+
+// What Nidestream has for each address: { url: { state, progress, fileName } }. `supported` is
+// false for app versions without /status, so the popup falls back to what this extension sent.
+async function appStatus(urls) {
+  if (!urls.length) return { supported: true, items: {} };
+  try {
+    const answer = await call("/status", { urls });
+    return { supported: true, items: answer.items || {} };
+  } catch {
+    return { supported: false, items: {} };
+  }
+}
+
 async function downloadMedia(tab, src, title) {
   const pageTitle = title || tab?.title;
   const direct = src && /^https?:/i.test(src) ? src : null;
@@ -350,9 +375,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         return { items: mediaFor(message.tabId) };
       case "downloadItem": {
         const tab = await chrome.tabs.get(message.tabId);
-        await sendDownload({ url: message.item.url, referrer: tab.url, pageTitle: tab.title, kind: message.item.type === "hls" ? "hls" : null, fileSize: message.item.size });
-        return { ok: true };
+        const answer = await sendDownload({ url: message.item.url, referrer: tab.url, pageTitle: tab.title, kind: message.item.type === "hls" ? "hls" : null, fileSize: message.item.size });
+        markSent(message.item.url);
+        return { ok: true, status: answer.status || "added" };
       }
+      case "mediaStatus":
+        return appStatus(message.urls || []);
       case "allLinks": {
         const tab = await chrome.tabs.get(message.tabId);
         await sendPageLinks(tab, false, 0);

@@ -64,5 +64,7 @@ button {
 }
 button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.state, button.state:hover { background: none; border-color: transparent; color: var(--muted); cursor: default; padding: 5px 2px; white-space: nowrap; }
+button.state.ok { color: var(--ok); }
 footer { margin-top: 12px; }
 footer button { width: 100%; }

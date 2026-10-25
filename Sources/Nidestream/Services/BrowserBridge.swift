@@ -133,6 +133,10 @@ private struct AddPayload: Decodable {
     var kind: String?
 }
 
+private struct StatusPayload: Decodable {
+    var urls: [String]
+}
+
 private struct HelloPayload: Decodable {
     var browser: String
     var version: String?
@@ -190,8 +194,13 @@ enum BridgeRouter {
             let decoder = JSONDecoder()
             switch path {
             case "/add":
-                guard let payload = try? decoder.decode(AddPayload.self, from: request.body) else { return .json(["ok": false], status: 400, headers: cors) }
-                return add(payload) ? .json(["ok": true], headers: cors) : .json(["ok": false], status: 400, headers: cors)
+                guard let payload = try? decoder.decode(AddPayload.self, from: request.body), let status = add(payload) else {
+                    return .json(["ok": false], status: 400, headers: cors)
+                }
+                return .json(["ok": true, "status": status], headers: cors)
+            case "/status":
+                guard let payload = try? decoder.decode(StatusPayload.self, from: request.body) else { return .json(["ok": false], status: 400, headers: cors) }
+                return .json(["ok": true, "items": status(of: payload.urls)], headers: cors)
             case "/links":
                 guard let payload = try? decoder.decode(LinksPayload.self, from: request.body) else { return .json(["ok": false], status: 400, headers: cors) }
                 return links(payload) ? .json(["ok": true], headers: cors) : .json(["ok": false], status: 400, headers: cors)
@@ -220,8 +229,51 @@ enum BridgeRouter {
         return url
     }
 
-    private static func add(_ payload: AddPayload) -> Bool {
-        guard let url = webURL(payload.url) else { return false }
+    /// What Nidestream has for each address, so the extension doesn't offer files it already has.
+    private static func status(of addresses: [String]) -> [String: Any] {
+        var result: [String: Any] = [:]
+        for address in addresses.prefix(200) {
+            guard let url = URL(string: address), let item = knownDownload(for: url) else { continue }
+            let state: String
+            switch item.record.status {
+            case .connecting, .downloading, .processing: state = "downloading"
+            case .queued: state = "queued"
+            case .paused: state = "paused"
+            case .failed: state = "failed"
+            case .completed: state = "completed"
+            }
+            result[address] = ["state": state, "progress": item.progress, "fileName": item.record.fileName]
+        }
+        return result
+    }
+
+    /// The download Nidestream already has for `url`: an unfinished one first, else a finished one
+    /// whose file still exists.
+    private static func knownDownload(for url: URL) -> DownloadItem? {
+        let matches = DownloadManager.shared.items.filter { $0.record.url == url }
+        return matches.first { $0.record.status != .completed }
+            ?? matches.first { FileManager.default.fileExists(atPath: $0.record.fileURL.path) }
+    }
+
+    /// Returns "added", "existing", "resumed" or "downloaded", or nil for a bad request.
+    private static func add(_ payload: AddPayload) -> String? {
+        guard let url = webURL(payload.url) else { return nil }
+        if let known = knownDownload(for: url) {
+            // The same link again (for example the popup's Download button for a file that was
+            // already taken over): never start a second copy.
+            switch known.record.status {
+            case .paused, .failed:
+                DownloadManager.shared.resume([known])
+                DownloadToast.show(fileName: known.record.fileName, size: known.record.totalBytes, title: "Resumed in Nidestream")
+                return "resumed"
+            case .completed:
+                DownloadToast.show(fileName: known.record.fileName, size: known.record.totalBytes, title: "Already downloaded")
+                return "downloaded"
+            default:
+                DownloadToast.show(fileName: known.record.fileName, size: known.record.totalBytes, title: "Already downloading in Nidestream")
+                return "existing"
+            }
+        }
         let isHLS = payload.kind == "hls" || url.pathExtension.lowercased() == "m3u8"
         var new = NewDownload(url: url)
         new.fileName = payload.fileName.flatMap { $0.isEmpty ? nil : $0 }
@@ -241,7 +293,7 @@ enum BridgeRouter {
             let item = DownloadManager.shared.add(new, start: true)
             DownloadToast.show(fileName: item.record.fileName, size: item.record.totalBytes)
         }
-        return true
+        return "added"
     }
 
     private static func links(_ payload: LinksPayload) -> Bool {

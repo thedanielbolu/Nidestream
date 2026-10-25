@@ -27,6 +27,11 @@ public enum LinkRefresh {
         return updated
     }
 
+    /// Whether two file names are the same apart from case and a " (1)"-style duplicate suffix.
+    public static func sameFileName(_ a: String, _ b: String) -> Bool {
+        baseName(a) == baseName(b)
+    }
+
     /// Lowercased file name without a trailing " (n)" before the extension.
     static func baseName(_ name: String) -> String {
         let ext = (name as NSString).pathExtension

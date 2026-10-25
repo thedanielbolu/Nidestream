@@ -441,6 +441,20 @@ final class DownloadManager {
                     self.continueDownload(existing, with: record.url, probe: probe, from: source)
                     return
                 }
+                if let probe, !self.keepSeparate.contains(id), probe.totalBytes > 0,
+                   let twin = self.items.first(where: { other in
+                       other.id != id && (other.record.status.isRunning || other.record.status == .queued)
+                           && other.record.totalBytes == probe.totalBytes
+                           && LinkRefresh.sameFileName(other.record.fileName, probe.fileName)
+                   }) {
+                    // The same file is already on its way (often the same link sent twice): don't fetch it again.
+                    self.runIDs[id] = nil
+                    self.items.removeAll { $0.id == id }
+                    DownloadToast.show(fileName: twin.record.fileName, size: twin.record.totalBytes, title: "Already downloading in Nidestream")
+                    self.pump()
+                    self.save()
+                    return
+                }
                 if let probe { self.apply(probe, to: item) }
                 try self.checkDiskSpace(item.record)
                 let runner = self.makeRunner(for: item, runID: runID, headers: headers, credential: credential)
