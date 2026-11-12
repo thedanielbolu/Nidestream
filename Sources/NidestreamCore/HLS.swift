@@ -254,6 +254,8 @@ public final class HLSDownloader: DownloadRunner, @unchecked Sendable {
     private var inFlight = 0
     private var finished = false
     private var keys: [URL: Data] = [:]
+    /// Free space on the drive holding a folder. Tests replace it to stand in for a full drive.
+    var availableCapacity: @Sendable (URL) -> Int64? = { FileUtils.availableCapacity(at: $0) }
 
     public init(job: HLSJob, limiters: [RateLimiter], onEvent: @escaping @Sendable (RunnerEvent) -> Void) {
         self.job = job
@@ -290,11 +292,12 @@ public final class HLSDownloader: DownloadRunner, @unchecked Sendable {
             try FileManager.default.createDirectory(at: job.workDirectory, withIntermediateDirectories: true)
             let tracks = try await resolveTracks(session)
             lock.withLock { partsTotal = tracks.reduce(0) { $0 + $1.parts.count } }
-            for track in tracks { try await download(track, session: session) }
+            var sizes: [Int64] = []
+            for track in tracks { sizes.append(try await download(track, session: session)) }
             try Task.checkCancellation()
             ticker.cancel()
             onEvent(.processing)
-            let outputs = try assemble(tracks)
+            let outputs = try assemble(tracks, sizes: sizes)
             finish(.completed(outputs: outputs))
         } catch {
             if Task.isCancelled || (error as? URLError)?.code == .cancelled || error is CancellationError {
@@ -390,7 +393,27 @@ public final class HLSDownloader: DownloadRunner, @unchecked Sendable {
         track.directory.appendingPathComponent(String(format: "%06d.seg", index))
     }
 
-    private func download(_ track: Track, session: URLSession) async throws {
+    /// The track's parts joined into one file, as assembly leaves it.
+    private func joinedFile(_ track: Track) -> URL {
+        job.workDirectory.appendingPathComponent("\(track.name).\(track.fileExtension)")
+    }
+
+    /// The size of the track's joined file when an earlier run already joined it (and deleted its parts).
+    private func joinedSize(_ track: Track) -> Int64? {
+        guard !FileManager.default.fileExists(atPath: track.directory.path) else { return nil }
+        return (try? joinedFile(track).resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init)
+    }
+
+    /// Fetches the track's missing parts; returns the bytes all of its parts take.
+    private func download(_ track: Track, session: URLSession) async throws -> Int64 {
+        if let size = joinedSize(track) {
+            lock.withLock {
+                bytes += size
+                partsDone += track.parts.count
+            }
+            return size
+        }
+        let before = lock.withLock { bytes }
         try FileManager.default.createDirectory(at: track.directory, withIntermediateDirectories: true)
         let parts = Array(track.parts.enumerated())
         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -402,6 +425,7 @@ public final class HLSDownloader: DownloadRunner, @unchecked Sendable {
             for _ in 0..<max(1, job.concurrency) { addNext() }
             while try await group.next() != nil { addNext() }
         }
+        return lock.withLock { bytes } - before
     }
 
     private func fetch(_ part: HLSMediaSegment, to destination: URL, session: URLSession) async throws {
@@ -429,9 +453,14 @@ public final class HLSDownloader: DownloadRunner, @unchecked Sendable {
                     payload = try Self.decryptAES128(data, key: keyData, iv: key.iv ?? Self.iv(for: part.sequence))
                 }
                 let temporary = destination.appendingPathExtension("tmp")
-                try payload.write(to: temporary)
-                try? FileManager.default.removeItem(at: destination)
-                try FileManager.default.moveItem(at: temporary, to: destination)
+                do {
+                    try payload.write(to: temporary)
+                    try? FileManager.default.removeItem(at: destination)
+                    try FileManager.default.moveItem(at: temporary, to: destination)
+                } catch {
+                    try? FileManager.default.removeItem(at: temporary)
+                    throw Self.diskError(error)
+                }
                 lock.withLock {
                     bytes += Int64(payload.count)
                     partsDone += 1
@@ -485,18 +514,19 @@ public final class HLSDownloader: DownloadRunner, @unchecked Sendable {
 
     // MARK: Assembly
 
-    private func assemble(_ tracks: [Track]) throws -> [URL] {
+    /// `sizes` holds the bytes each track's parts take, which its joined file takes too.
+    private func assemble(_ tracks: [Track], sizes: [Int64]) throws -> [URL] {
         let fm = FileManager.default
+        // A track's parts are deleted once it's joined, so joining needs room for one more copy of
+        // that track. Remuxing then needs room for one more copy of every track.
+        let unjoined = zip(tracks, sizes).filter { fm.fileExists(atPath: $0.0.directory.path) }.map(\.1)
+        let needed = job.ffmpegPath != nil ? sizes.reduce(0, +) : unjoined.max() ?? 0
+        if let free = availableCapacity(job.workDirectory), free < needed { throw DownloadError.notEnoughSpace }
+
         var files: [URL] = []
         for track in tracks {
-            let output = job.workDirectory.appendingPathComponent("\(track.name).\(track.fileExtension)")
-            fm.createFile(atPath: output.path, contents: nil)
-            let handle = try FileHandle(forWritingTo: output)
-            defer { try? handle.close() }
-            for index in track.parts.indices {
-                try handle.write(contentsOf: try Data(contentsOf: partURL(track, index), options: .mappedIfSafe))
-            }
-            files.append(output)
+            if fm.fileExists(atPath: track.directory.path) { try join(track) }
+            files.append(joinedFile(track))
         }
 
         if let ffmpeg = job.ffmpegPath {
@@ -508,10 +538,48 @@ public final class HLSDownloader: DownloadRunner, @unchecked Sendable {
             if Self.run(ffmpeg, arguments) == 0, fm.fileExists(atPath: merged.path) {
                 for file in files { try? fm.removeItem(at: file) }
                 files = [merged]
+            } else {
+                try? fm.removeItem(at: merged)
             }
         }
-        for track in tracks { try? fm.removeItem(at: track.directory) }
         return files
+    }
+
+    /// Joins the track's parts into its joined file, then deletes them. The file appears under its
+    /// name only once complete, so a later run can tell a joined track from a half-joined one.
+    private func join(_ track: Track) throws {
+        let fm = FileManager.default
+        let output = joinedFile(track)
+        let temporary = output.appendingPathExtension("joining")
+        do {
+            try Data().write(to: temporary)
+            let handle = try FileHandle(forWritingTo: temporary)
+            do {
+                for index in track.parts.indices {
+                    try handle.write(contentsOf: try Data(contentsOf: partURL(track, index), options: .mappedIfSafe))
+                }
+                try handle.close()
+            } catch {
+                try? handle.close()
+                throw error
+            }
+            try? fm.removeItem(at: output)
+            try fm.moveItem(at: temporary, to: output)
+        } catch {
+            try? fm.removeItem(at: temporary)
+            throw Self.diskError(error)
+        }
+        try? fm.removeItem(at: track.directory)
+    }
+
+    /// Turns a failed file operation into an error that isn't retried: retrying can't fix the drive.
+    static func diskError(_ error: Error) -> DownloadError {
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain, error.code == CocoaError.fileWriteOutOfSpace.rawValue { return .notEnoughSpace }
+        let posix = [error, error.userInfo[NSUnderlyingErrorKey] as? NSError].compactMap { $0 }
+            .first { $0.domain == NSPOSIXErrorDomain }
+        guard let code = posix?.code else { return .io(error.localizedDescription) }
+        return code == Int(ENOSPC) ? .notEnoughSpace : .io(String(cString: strerror(Int32(code))))
     }
 
     private static func run(_ executable: String, _ arguments: [String]) -> Int32 {
