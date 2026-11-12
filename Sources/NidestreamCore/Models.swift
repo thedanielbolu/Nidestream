@@ -154,6 +154,10 @@ public enum DownloadError: Error, LocalizedError, Equatable, Sendable {
     case unsupported(String)
     case tooManyRetries(String)
     case notEnoughSpace
+    /// The file is bigger than the drive's format allows (the largest size it can hold).
+    case tooLargeForDrive(Int64)
+    case driveNotConnected(String)
+    case driveReadOnly
 
     public var errorDescription: String? {
         switch self {
@@ -167,6 +171,14 @@ public enum DownloadError: Error, LocalizedError, Equatable, Sendable {
         case .unsupported(let message): return message
         case .tooManyRetries(let message): return "Gave up after repeated errors. \(message)"
         case .notEnoughSpace: return "There isn't enough free disk space for this file."
+        case .tooLargeForDrive(let limit):
+            let size = ByteCountFormatter.string(fromByteCount: limit + 1, countStyle: .binary)
+            return "This drive can't hold files of \(size) or more (FAT32-formatted drives have this limit). "
+                + "Choose a folder on another drive, or reformat this one as ExFAT in Disk Utility (that erases it)."
+        case .driveNotConnected(let name):
+            return "The drive “\(name)” isn't connected. Plug it in and resume the download, or choose another folder."
+        case .driveReadOnly:
+            return "This drive is read-only on a Mac (NTFS drives are, for example). Choose a folder on another drive."
         }
     }
 }

@@ -24,11 +24,13 @@ struct IntegrationTests {
 
     /// Runs a downloader until it finishes; optionally stops it after `stopAfter` seconds.
     private func run(_ job: HTTPJob, limiters: [RateLimiter] = [], stopAfter: TimeInterval? = nil,
+                     onPreparing: @escaping @Sendable (Bool) -> Void = { _ in },
                      onProgress: @escaping @Sendable (DownloadProgress) -> Void = { _ in }) async -> (RunnerResult, DownloadProgress) {
         let box = LockedBox()
         let runner = SegmentedDownloader(job: job, limiters: limiters) { event in
             switch event {
             case .progress(let progress): onProgress(progress)
+            case .preparing(let active): onPreparing(active)
             case .finished(let result, let progress): box.finish(result, progress)
             case .processing: break
             }
@@ -59,6 +61,24 @@ struct IntegrationTests {
         #expect(second == .completed(outputs: []))
         #expect(done.receivedBytes == probe.totalBytes)
         #expect(try sha256(part) == (try await expectedHash("big.bin")))
+    }
+
+    /// Progress counts as saved only once it's on the disk, so a USB drive pulled out without
+    /// ejecting can't leave holes that a resume would skip.
+    @Test func savedProgressTrailsWhatIsWritten() async throws {
+        let source = url("/big.bin")
+        let probe = try await Prober.probe(url: source, headers: [:])
+        let part = directory.appendingPathComponent("saved.nidestream")
+        let job = HTTPJob(url: source, partURL: part, totalBytes: probe.totalBytes, resumable: true, maxConnections: 2, validator: probe.validator)
+        let samples = LockedPairs()
+        let (result, stopped) = await run(job, stopAfter: 4.5) { progress in
+            samples.add(saved: progress.savedSegments?.reduce(0) { $0 + $1.received } ?? 0, live: progress.receivedBytes)
+        }
+        #expect(result == .stopped)
+        #expect(samples.values.allSatisfy { $0.saved <= $0.live })
+        #expect(samples.values.contains { $0.saved > 0 }, "no checkpoint within 4.5 s")
+        // Stopping pushes everything to the disk first, so all of it counts.
+        #expect(stopped.savedSegments == stopped.segments)
     }
 
     private func expectedHash(_ name: String) async throws -> String {
@@ -207,11 +227,86 @@ struct IntegrationTests {
         #expect(elapsed > 1.6 && elapsed < 2.6, "16 → 32 MB took \(elapsed) s")
     }
 
+    /// USB drives are usually FAT32 or exFAT, which macOS reports differently from APFS: no
+    /// "important usage" free space, a 4 GB file limit (FAT32), and space reserved up front.
+    @Test func downloadsToAFAT32Drive() async throws {
+        let drive = try FAT32Image(in: directory)
+        defer { drive.detach() }
+        let free = try #require(FileUtils.availableCapacity(at: drive.mount))
+        #expect(free > 60_000_000, "free space on an empty 96 MB FAT32 drive: \(free)")
+        #expect(FileUtils.maximumFileSize(at: drive.mount) == 4_294_967_295)
+
+        let source = url("/big.bin")
+        let probe = try await Prober.probe(url: source, headers: [:])
+        let part = drive.mount.appendingPathComponent("big.bin.nidestream")
+        var job = HTTPJob(url: source, partURL: part, totalBytes: probe.totalBytes, resumable: true, maxConnections: 4, validator: probe.validator)
+        let preparing = LockedFlags()
+        let (first, paused) = await run(job, stopAfter: 1.0, onPreparing: { preparing.add($0) })
+        #expect(first == .stopped)
+        #expect(preparing.values == [true, false])
+        #expect(paused.receivedBytes < probe.totalBytes)
+        // The paused file already holds its whole size, so resuming needs no more space.
+        #expect(FileUtils.spaceNeeded(totalBytes: probe.totalBytes, receivedBytes: paused.receivedBytes, partFile: part) == 0)
+        #expect(paused.savedSegments == paused.segments)
+
+        job.segments = try #require(paused.savedSegments)
+        let (second, done) = await run(job)
+        #expect(second == .completed(outputs: []))
+        #expect(done.receivedBytes == probe.totalBytes)
+        #expect(try sha256(part) == (try await expectedHash("big.bin")))
+    }
+
     @Test func notFoundFailsWithoutRetrying() async throws {
         await #expect(throws: DownloadError.http(404)) {
             try await Prober.probe(url: url("/missing.bin"), headers: [:])
         }
     }
+}
+
+/// A small FAT32 disk image, mounted for one test (no administrator rights needed).
+private struct FAT32Image {
+    let image: URL
+    let mount: URL
+
+    init(in directory: URL) throws {
+        image = directory.appendingPathComponent("fat32.sparseimage")
+        mount = directory.appendingPathComponent("fat32-mount", isDirectory: true)
+        try FileManager.default.createDirectory(at: mount, withIntermediateDirectories: true)
+        try Self.hdiutil(["create", "-quiet", "-size", "96m", "-fs", "MS-DOS FAT32", "-volname", "NSTEST", "-type", "SPARSE", image.path])
+        try Self.hdiutil(["attach", "-quiet", "-nobrowse", "-noautoopen", "-mountpoint", mount.path, image.path])
+    }
+
+    func detach() {
+        try? Self.hdiutil(["detach", "-quiet", "-force", mount.path])
+        try? FileManager.default.removeItem(at: image)
+    }
+
+    private static func hdiutil(_ arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        process.arguments = arguments
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw DownloadError.io("hdiutil \(arguments[0]) failed") }
+    }
+}
+
+private final class LockedPairs: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [(saved: Int64, live: Int64)] = []
+
+    var values: [(saved: Int64, live: Int64)] { lock.withLock { stored } }
+
+    func add(saved: Int64, live: Int64) { lock.withLock { stored.append((saved, live)) } }
+}
+
+private final class LockedFlags: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [Bool] = []
+
+    var values: [Bool] { lock.withLock { stored } }
+
+    func add(_ value: Bool) { lock.withLock { stored.append(value) } }
 }
 
 private final class LockedCounts: @unchecked Sendable {

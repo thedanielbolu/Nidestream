@@ -212,6 +212,27 @@ enum CCCryptShim {
     }
 }
 
+@Suite struct DriveTests {
+    @Test func namesADisconnectedDrive() throws {
+        #expect(FileUtils.disconnectedVolume(for: URL(fileURLWithPath: "/Volumes/No Such Drive 7f3a/Downloads")) == "No Such Drive 7f3a")
+        #expect(FileUtils.disconnectedVolume(for: FileManager.default.temporaryDirectory) == nil)
+        // Any drive that is mounted (the startup disk always is, whatever its name).
+        let mounted = try #require(try FileManager.default.contentsOfDirectory(atPath: "/Volumes").first { !$0.hasPrefix(".") })
+        #expect(FileUtils.disconnectedVolume(for: URL(fileURLWithPath: "/Volumes/\(mounted)/Downloads")) == nil)
+    }
+
+    @Test func explainsDriveProblems() {
+        #expect(DownloadError.tooLargeForDrive(4_294_967_295).errorDescription?.contains("files of 4 GB or more") == true)
+        #expect(DownloadError.driveNotConnected("Lexar").errorDescription?.contains("“Lexar” isn't connected") == true)
+    }
+
+    @Test func spaceNeededWithoutAPartFile() {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("missing-\(UUID().uuidString).nidestream")
+        #expect(FileUtils.spaceNeeded(totalBytes: 5000, receivedBytes: 1200, partFile: missing) == 3800)
+        #expect(FileUtils.spaceNeeded(totalBytes: 5000, receivedBytes: 5000, partFile: missing) == 0)
+    }
+}
+
 @Suite struct LinkRefreshTests {
     private func record(_ name: String, total: Int64, received: Int64 = 1000) -> DownloadRecord {
         var record = DownloadRecord(url: URL(string: "https://old.example.com/a")!, fileName: name, directory: URL(fileURLWithPath: "/tmp"))

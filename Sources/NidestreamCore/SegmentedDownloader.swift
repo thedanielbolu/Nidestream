@@ -97,6 +97,12 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
     /// Single-stream downloads (no ranges) can't be paced, so they fall back to suspending.
     private var suspendedUntil: [ObjectIdentifier: TimeInterval] = [:]
     private var fd: Int32 = -1
+    /// Segments whose data is known to be on the drive. Data written since may still be in the
+    /// cache, and is lost if a USB drive is pulled out without ejecting, so only these are kept
+    /// for resuming.
+    private var savedSegments: [Segment] = []
+    private var flushing = false
+    private var lastFlush: TimeInterval = 0
     private var timer: DispatchSourceTimer?
     private let started = ProcessInfo.processInfo.systemUptime
     /// Set NIDESTREAM_DEBUG=1 to trace connections on stderr.
@@ -155,15 +161,26 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
         if segments.isEmpty || !resumable || !hasProgress {
             segments = SegmentPlanner.initialSegments(totalBytes: totalBytes, connections: resumable ? connectionLimit : 1,
                                                       minSize: job.minSegmentSize)
-            // Sparse preallocation for ranged downloads; a plain stream just grows the file.
-            _ = ftruncate(fd, off_t(resumable ? totalBytes : 0))
+            // Reserve the whole file for ranged downloads (sparse on APFS); a plain stream just grows it.
+            let size = resumable ? totalBytes : 0
+            if size > fileSize { onEvent(.preparing(true)) }
+            let reserved = ftruncate(fd, off_t(size)) == 0
+            let code = errno
+            if size > fileSize { onEvent(.preparing(false)) }
+            guard reserved else {
+                return fail(code == ENOSPC ? DownloadError.notEnoughSpace
+                            : DownloadError.io("Can't reserve space for \(job.partURL.lastPathComponent): \(String(cString: strerror(code)))"))
+            }
         }
+        savedSegments = segments
+        lastFlush = ProcessInfo.processInfo.systemUptime
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
         timer.setEventHandler { [weak self] in
             guard let self, self.state == .running else { return }
             self.adapt()
+            self.checkpoint()
             self.onEvent(.progress(self.snapshot()))
         }
         timer.resume()
@@ -297,6 +314,8 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
         for session in sessions { session.invalidateAndCancel() }
         sessions.removeAll()
         if fd >= 0 {
+            // Make everything written so far durable before letting go of the file.
+            if fsync(fd) == 0 { savedSegments = segments }
             close(fd)
             fd = -1
         }
@@ -305,7 +324,28 @@ public final class SegmentedDownloader: NSObject, DownloadRunner, URLSessionData
     private func snapshot() -> DownloadProgress {
         let received = segments.isEmpty ? max(0, totalBytes) : segments.reduce(0) { $0 + $1.received }
         return DownloadProgress(receivedBytes: received, totalBytes: totalBytes, segments: segments,
-                                activeSegments: connections.keys.sorted(), resumable: resumable)
+                                activeSegments: connections.keys.sorted(), resumable: resumable, savedSegments: savedSegments)
+    }
+
+    /// Every few seconds, pushes what has been written to the drive (fsync, off this queue, as a
+    /// slow USB drive can take a while) and then counts it as saved.
+    private func checkpoint() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !flushing, now - lastFlush >= 3, fd >= 0 else { return }
+        let file = dup(fd)
+        guard file >= 0 else { return }
+        flushing = true
+        lastFlush = now
+        let written = segments
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let flushed = fsync(file) == 0
+            close(file)
+            self?.queue.async {
+                guard let self else { return }
+                self.flushing = false
+                if flushed, self.state == .running { self.savedSegments = written }
+            }
+        }
     }
 
     // MARK: - Adaptive connections

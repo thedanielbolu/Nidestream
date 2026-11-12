@@ -43,6 +43,8 @@ enum CommandLineDownload {
                                      ByteCountFormatter.string(fromByteCount: Int64(rate), countStyle: .file), progress.connections),
                               terminator: "")
                         fflush(stdout)
+                    case .preparing(let active):
+                        if active { print("Reserving space on the drive…") }
                     case .processing:
                         print("\nMerging…")
                     case .finished(let result, let progress):

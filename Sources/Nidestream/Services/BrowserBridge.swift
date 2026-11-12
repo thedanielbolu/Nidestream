@@ -262,6 +262,10 @@ enum BridgeRouter {
             // The same link again (for example the popup's Download button for a file that was
             // already taken over): never start a second copy.
             switch known.record.status {
+            case .failed where known.record.receivedBytes == 0:
+                // Nothing to continue (the drive was full or unplugged, say): start over below, in
+                // the download folder as it's set now.
+                DownloadManager.shared.remove([known], deleteFiles: false)
             case .paused, .failed:
                 DownloadManager.shared.resume([known])
                 DownloadToast.show(fileName: known.record.fileName, size: known.record.totalBytes, title: "Resumed in Nidestream")

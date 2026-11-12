@@ -86,7 +86,7 @@ private struct DownloadDetails: View {
     private var progressSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             if record.kind == .http {
-                SegmentMap(segments: record.segments, total: record.totalBytes, active: Set(item.activeSegments),
+                SegmentMap(segments: item.liveSegments ?? record.segments, total: record.totalBytes, active: Set(item.activeSegments),
                            complete: record.status == .completed)
             } else {
                 ProgressView(value: item.progress).progressViewStyle(.linear)

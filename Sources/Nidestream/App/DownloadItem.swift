@@ -11,6 +11,10 @@ final class DownloadItem: Identifiable {
     var speed: Double = 0
     var activeSegments: [Int] = []
     var parts: (done: Int, total: Int)?
+    /// The file's space is being reserved on its drive, which takes a while on FAT32 drives.
+    var preparingSpace = false
+    /// The segments as the engine has them now, which can be ahead of the saved `record.segments`.
+    var liveSegments: [Segment]?
 
     @ObservationIgnored var lastTick: (time: TimeInterval, bytes: Int64)?
 
@@ -40,12 +44,12 @@ final class DownloadItem: Identifiable {
     var statusText: String {
         switch record.status {
         case .queued: return record.startWhenPossible ? "Waiting" : "Queued"
-        case .connecting: return "Connecting…"
+        case .connecting: return preparingSpace ? "Reserving space…" : "Connecting…"
         case .downloading:
             if let parts { return "Downloading \(parts.done)/\(parts.total)" }
             return "Downloading"
         case .paused: return "Paused"
-        case .processing: return "Merging…"
+        case .processing: return record.kind == .hls ? "Merging…" : "Saving…"
         case .completed: return "Complete"
         case .failed: return "Error"
         }

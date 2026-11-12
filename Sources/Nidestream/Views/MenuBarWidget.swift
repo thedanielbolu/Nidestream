@@ -366,8 +366,8 @@ private struct WidgetDownloadRow: View {
             if item.speed >= 1 { parts.append(Fmt.speed(item.speed)) }
             if let eta = item.eta { parts.append("\(Fmt.duration(eta)) left") }
             return parts.joined(separator: " · ")
-        case .connecting: return "Connecting…"
-        case .processing: return "Merging video…"
+        case .connecting: return item.preparingSpace ? "Reserving space on the drive…" : "Connecting…"
+        case .processing: return record.kind == .hls ? "Merging video…" : "Saving…"
         case .queued: return record.startWhenPossible ? "Waiting for a free slot" : "In the queue"
         case .paused:
             return record.totalBytes > 0 ? "Paused · \(Fmt.bytes(record.receivedBytes)) of \(Fmt.bytes(record.totalBytes))" : "Paused"

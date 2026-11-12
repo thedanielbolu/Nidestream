@@ -83,11 +83,14 @@ public enum FileUtils {
     public static let partSuffix = ".nidestream"
 
     /// Returns `name`, or `name (1)`, `name (2)`… whichever is free in `directory`.
-    /// `taken` holds lowercased names already claimed by other downloads.
-    public static func uniqueName(_ name: String, in directory: URL, taken: Set<String> = [], checkPartFiles: Bool = true) -> String {
+    /// `taken` holds lowercased names already claimed by other downloads. With `checkDisk` false
+    /// only `taken` is consulted, for the main thread: a USB drive can take seconds to answer.
+    public static func uniqueName(_ name: String, in directory: URL, taken: Set<String> = [], checkPartFiles: Bool = true,
+                                  checkDisk: Bool = true) -> String {
         let fm = FileManager.default
         func isFree(_ candidate: String) -> Bool {
             if taken.contains(candidate.lowercased()) { return false }
+            guard checkDisk else { return true }
             if fm.fileExists(atPath: directory.appendingPathComponent(candidate).path) { return false }
             if checkPartFiles, fm.fileExists(atPath: directory.appendingPathComponent(candidate + partSuffix).path) { return false }
             return true
@@ -124,9 +127,32 @@ public enum FileUtils {
         try? (file as NSURL).setResourceValue(properties, forKey: .quarantinePropertiesKey)
     }
 
+    /// Free space on the drive holding `directory`. "Important usage" also counts space macOS can
+    /// free up (caches, purgeable files), but drives it doesn't manage, such as FAT32 and exFAT
+    /// USB drives, report 0 for it; their plain free space is the real figure.
     public static func availableCapacity(at directory: URL) -> Int64? {
-        let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage
+        let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
+        if let important = values?.volumeAvailableCapacityForImportantUsage, important > 0 { return important }
+        return values?.volumeAvailableCapacity.map(Int64.init)
+    }
+
+    /// The largest file the drive holding `directory` can store: 4 GB minus one byte on FAT32.
+    public static func maximumFileSize(at directory: URL) -> Int64? {
+        (try? directory.resourceValues(forKeys: [.volumeMaximumFileSizeKey]))?.volumeMaximumFileSize.map(Int64.init)
+    }
+
+    /// Bytes a download still needs on its drive. The part file may already take more than the
+    /// bytes received: FAT32 and exFAT drives reserve its whole size as soon as it's created.
+    public static func spaceNeeded(totalBytes: Int64, receivedBytes: Int64, partFile: URL) -> Int64 {
+        let allocated = (try? partFile.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?.totalFileAllocatedSize ?? 0
+        return max(0, totalBytes - max(receivedBytes, Int64(allocated)))
+    }
+
+    /// The name of the external drive `directory` is on, when that drive isn't connected.
+    public static func disconnectedVolume(for directory: URL) -> String? {
+        let parts = directory.standardizedFileURL.pathComponents
+        guard parts.count >= 3, parts[0] == "/", parts[1] == "Volumes" else { return nil }
+        return FileManager.default.fileExists(atPath: "/Volumes/" + parts[2]) ? nil : parts[2]
     }
 }
 
@@ -157,6 +183,9 @@ final class CredentialDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sen
 /// Events every download engine reports, always delivered in order from one queue.
 public enum RunnerEvent: Sendable {
     case progress(DownloadProgress)
+    /// Reserving the file's full size on disk started (true) or ended (false). Instant on APFS,
+    /// but FAT32 drives write zeros over the whole file first, which can take a minute.
+    case preparing(Bool)
     case processing
     case finished(RunnerResult, DownloadProgress)
 }
@@ -176,9 +205,11 @@ public struct DownloadProgress: Sendable {
     public var resumable: Bool
     public var partsDone: Int?
     public var partsTotal: Int?
+    /// The segments as far as their data is known to be on the drive: what to keep for resuming.
+    public var savedSegments: [Segment]?
 
     public init(receivedBytes: Int64, totalBytes: Int64, segments: [Segment]?, activeSegments: [Int], resumable: Bool,
-                partsDone: Int? = nil, partsTotal: Int? = nil) {
+                partsDone: Int? = nil, partsTotal: Int? = nil, savedSegments: [Segment]? = nil) {
         self.receivedBytes = receivedBytes
         self.totalBytes = totalBytes
         self.segments = segments
@@ -186,6 +217,7 @@ public struct DownloadProgress: Sendable {
         self.resumable = resumable
         self.partsDone = partsDone
         self.partsTotal = partsTotal
+        self.savedSegments = savedSegments
     }
 
     public var connections: Int { activeSegments.count }

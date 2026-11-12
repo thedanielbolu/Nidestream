@@ -42,6 +42,8 @@ final class DownloadManager {
     @ObservationIgnored private var queueDidWork = false
     /// New downloads the user asked to fetch again rather than continue an existing copy.
     @ObservationIgnored private var keepSeparate: Set<UUID> = []
+    /// Finished downloads whose file is being moved into place.
+    @ObservationIgnored private var finalizing: Set<UUID> = []
 
     private var prefs: Preferences { SettingsStore.shared.prefs }
 
@@ -56,7 +58,14 @@ final class DownloadManager {
         let resume = prefs.resumeOnLaunch
         items = Persistence.loadDownloads().map { stored in
             var record = stored
-            if record.status.isRunning {
+            let fm = FileManager.default
+            if record.status == .processing, record.kind == .http, !fm.fileExists(atPath: record.partURL.path),
+               fm.fileExists(atPath: record.fileURL.path) {
+                // Nidestream quit while the finished file was being moved into place, and the move went through.
+                record.status = .completed
+                record.dateCompleted = Date()
+                record.segments = []
+            } else if record.status.isRunning {
                 record.status = resume ? .queued : .paused
                 record.startWhenPossible = resume
             }
@@ -73,7 +82,8 @@ final class DownloadManager {
 
     /// Called on quit: running downloads become paused (or queued) and the list is written synchronously.
     func prepareForQuit() {
-        for item in items where item.record.status.isRunning {
+        // A download being saved into place stays "processing", for load() to check next time.
+        for item in items where item.record.status.isRunning && !finalizing.contains(item.id) {
             runners[item.id]?.stop()
             item.record.status = prefs.resumeOnLaunch ? .queued : .paused
         }
@@ -100,8 +110,8 @@ final class DownloadManager {
         }
         let category = new.category ?? FileCategory.detect(fileName: name, in: prefs.categories)
         let directory = new.directory ?? folder(for: category)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        name = FileUtils.uniqueName(name, in: directory, taken: reservedNames(in: directory))
+        // Files already in the folder are checked when the download starts, off the main thread.
+        name = FileUtils.uniqueName(name, in: directory, taken: reservedNames(in: directory), checkDisk: false)
 
         var record = DownloadRecord(url: new.url, fileName: name, directory: directory)
         record.autoName = new.fileName == nil
@@ -165,7 +175,7 @@ final class DownloadManager {
     }
 
     func pause(_ targets: [DownloadItem]) {
-        for item in targets where item.record.status != .completed && item.record.status != .paused {
+        for item in targets where item.record.status != .completed && item.record.status != .paused && !finalizing.contains(item.id) {
             let wasRunning = item.record.status.isRunning
             item.record.status = .paused
             item.record.startWhenPossible = false
@@ -298,8 +308,21 @@ final class DownloadManager {
         }
     }
 
-    private static func explainFailure(_ message: String, receivedBytes: Int64) -> String {
-        guard receivedBytes > 0, ["HTTP 401", "HTTP 403", "HTTP 404", "HTTP 410"].contains(where: message.contains) else { return message }
+    private static func explainFailure(_ message: String, record: DownloadRecord) -> String {
+        if let drive = FileUtils.disconnectedVolume(for: record.directory) {
+            // Pulled out mid-download: what's saved is kept, so plugging it back in and resuming continues.
+            return DownloadError.driveNotConnected(drive).errorDescription ?? message
+        }
+        let onDrive = record.directory.standardizedFileURL.path.hasPrefix("/Volumes/")
+        if onDrive, message.contains("Operation not permitted") || message.contains("permission") {
+            return message + " macOS hasn't let Nidestream use this drive. Turn on Removable Volumes (or Network Volumes) for Nidestream "
+                + "in System Settings → Privacy & Security → Files & Folders, then resume."
+        }
+        if message.contains("File too large") {
+            return message + " This drive can't hold a file this big: FAT32-formatted drives stop at 4 GB. "
+                + "Choose a folder on another drive, or reformat this one as ExFAT in Disk Utility (that erases it)."
+        }
+        guard record.receivedBytes > 0, ["HTTP 401", "HTTP 403", "HTTP 404", "HTTP 410"].contains(where: message.contains) else { return message }
         return message + " The link has probably expired. Get a fresh one (click it again in your browser) and Nidestream will continue from where it stopped."
     }
 
@@ -414,6 +437,8 @@ final class DownloadManager {
         item.record.lastError = nil
         item.lastTick = nil
         item.parts = nil
+        item.preparingSpace = false
+        item.liveSegments = nil
 
         let record = item.record
         let headers = requestHeaders(for: record)
@@ -429,9 +454,9 @@ final class DownloadManager {
                 }
                 try Task.checkCancellation()
                 guard let self, self.runIDs[id] == runID, let item = self.item(id) else { return }
-                self.launches[id] = nil
                 if let probe, !self.keepSeparate.contains(id), let existing = self.unfinishedMatch(for: probe, excluding: id) {
                     // This file is already partly downloaded: continue that download with the new link instead.
+                    self.launches[id] = nil
                     self.runIDs[id] = nil
                     self.items.removeAll { $0.id == id }
                     var source = NewDownload(url: record.url)
@@ -448,6 +473,7 @@ final class DownloadManager {
                            && LinkRefresh.sameFileName(other.record.fileName, probe.fileName)
                    }) {
                     // The same file is already on its way (often the same link sent twice): don't fetch it again.
+                    self.launches[id] = nil
                     self.runIDs[id] = nil
                     self.items.removeAll { $0.id == id }
                     DownloadToast.show(fileName: twin.record.fileName, size: twin.record.totalBytes, title: "Already downloading in Nidestream")
@@ -456,14 +482,22 @@ final class DownloadManager {
                     return
                 }
                 if let probe { self.apply(probe, to: item) }
-                try self.checkDiskSpace(item.record)
+                // Off the main thread: a USB drive can take seconds to answer. Pausing meanwhile cancels this task.
+                let target = item.record
+                let taken = self.reservedNames(in: target.directory, excluding: id)
+                let name = try await Task.detached(priority: .userInitiated) { try Self.prepareDestination(target, taken: taken) }.value
+                try Task.checkCancellation()
+                guard self.runIDs[id] == runID, self.item(id) != nil else { return }
+                self.launches[id] = nil
+                item.record.fileName = name
                 let runner = self.makeRunner(for: item, runID: runID, headers: headers, credential: credential)
                 self.runners[id] = runner
                 runner.start()
             } catch is CancellationError {
             } catch let error as URLError where error.code == .cancelled {
             } catch {
-                guard let self, self.runIDs[id] == runID, let item = self.item(id) else { return }
+                // Paused or removed while the folder was being checked: that wins over the error.
+                guard !Task.isCancelled, let self, self.runIDs[id] == runID, let item = self.item(id) else { return }
                 self.launches[id] = nil
                 self.runIDs[id] = nil
                 item.record.status = .failed
@@ -494,7 +528,6 @@ final class DownloadManager {
             let category = FileCategory.detect(fileName: probe.fileName, in: prefs.categories)
             if item.record.directory.standardizedFileURL == folder(for: oldCategory).standardizedFileURL {
                 item.record.directory = folder(for: category)
-                try? FileManager.default.createDirectory(at: item.record.directory, withIntermediateDirectories: true)
             }
             item.record.category = category
             rename(item, to: probe.fileName)
@@ -504,12 +537,30 @@ final class DownloadManager {
 
     private func rename(_ item: DownloadItem, to name: String) {
         item.record.fileName = FileUtils.uniqueName(HTTPHeaderParsing.sanitizeFileName(name), in: item.record.directory,
-                                                    taken: reservedNames(in: item.record.directory, excluding: item.id))
+                                                    taken: reservedNames(in: item.record.directory, excluding: item.id), checkDisk: false)
     }
 
-    private func checkDiskSpace(_ record: DownloadRecord) throws {
-        guard record.totalBytes > 0, let free = FileUtils.availableCapacity(at: record.directory) else { return }
-        if record.totalBytes - record.receivedBytes > free { throw DownloadError.notEnoughSpace }
+    /// Gets the folder ready before a download starts, failing early with the reason when the file
+    /// can't be saved there, and returns the name to save under: a new download whose name is
+    /// taken by a file already in the folder gets a " (1)" name. Runs off the main thread.
+    nonisolated private static func prepareDestination(_ record: DownloadRecord, taken: Set<String>) throws -> String {
+        if let drive = FileUtils.disconnectedVolume(for: record.directory) { throw DownloadError.driveNotConnected(drive) }
+        // The drive may have been plugged in after the download was added, or the folder deleted since.
+        try? FileManager.default.createDirectory(at: record.directory, withIntermediateDirectories: true)
+        if (try? record.directory.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly == true {
+            throw DownloadError.driveReadOnly
+        }
+        if record.totalBytes > 0 {
+            // A stream's size is only an estimate until it's done, so the format limit is checked for plain files.
+            if record.kind == .http, let limit = FileUtils.maximumFileSize(at: record.directory), record.totalBytes > limit {
+                throw DownloadError.tooLargeForDrive(limit)
+            }
+            let needed = FileUtils.spaceNeeded(totalBytes: record.totalBytes, receivedBytes: record.receivedBytes, partFile: record.partURL)
+            if let free = FileUtils.availableCapacity(at: record.directory), needed > free { throw DownloadError.notEnoughSpace }
+        }
+        // A download with progress keeps its name, which its part file is named after.
+        guard record.receivedBytes == 0, FileManager.default.fileExists(atPath: record.fileURL.path) else { return record.fileName }
+        return FileUtils.uniqueName(record.fileName, in: record.directory, taken: taken)
     }
 
     private func makeRunner(for item: DownloadItem, runID: UUID, headers: [String: String], credential: URLCredential?) -> DownloadRunner {
@@ -545,6 +596,8 @@ final class DownloadManager {
             apply(progress, to: item)
             if item.record.status == .connecting { item.record.status = .downloading }
             if Date().timeIntervalSince(lastSave) > 5 { save() }
+        case .preparing(let active):
+            item.preparingSpace = active
         case .processing:
             item.record.status = .processing
             item.speed = 0
@@ -554,19 +607,29 @@ final class DownloadManager {
             runIDs[id] = nil
             item.speed = 0
             item.activeSegments = []
+            item.preparingSpace = false
+            item.liveSegments = nil
             switch result {
             case .completed(let outputs):
                 finalize(item, outputs: outputs)
             case .stopped:
+                keepSavedProgress(progress, in: item)
                 if item.record.status.isRunning { item.record.status = .paused }
             case .failed(let message):
+                keepSavedProgress(progress, in: item)
                 item.record.status = .failed
-                item.record.lastError = Self.explainFailure(message, receivedBytes: item.record.receivedBytes)
+                item.record.lastError = Self.explainFailure(message, record: item.record)
                 Notifier.downloadFailed(item)
             }
             pump()
             save()
         }
+    }
+
+    /// After a stop or failure, counts only what's known to be on the drive (less, if it was unplugged).
+    private func keepSavedProgress(_ progress: DownloadProgress, in item: DownloadItem) {
+        guard let saved = progress.savedSegments, !saved.isEmpty else { return }
+        item.record.receivedBytes = saved.reduce(0) { $0 + $1.received }
     }
 
     private func apply(_ progress: DownloadProgress, to item: DownloadItem) {
@@ -583,47 +646,67 @@ final class DownloadManager {
         }
         item.record.receivedBytes = progress.receivedBytes
         if progress.totalBytes >= 0 { item.record.totalBytes = progress.totalBytes }
-        if let segments = progress.segments { item.record.segments = segments }
+        if let segments = progress.segments { item.liveSegments = segments }
+        // Only data known to be on the drive is kept for resuming.
+        if let saved = progress.savedSegments ?? progress.segments { item.record.segments = saved }
         item.record.resumable = progress.resumable
         item.activeSegments = progress.activeSegments
         if let done = progress.partsDone, let total = progress.partsTotal, total > 0 { item.parts = (done, total) }
     }
 
+    /// Moves the finished file into place off the main thread (a USB drive can take seconds to
+    /// answer); the download shows "Saving…" meanwhile.
     private func finalize(_ item: DownloadItem, outputs: [URL]) {
-        let fm = FileManager.default
-        var record = item.record
+        let record = item.record
         let taken = reservedNames(in: record.directory, excluding: item.id)
-        do {
-            if outputs.isEmpty {
-                let name = FileUtils.uniqueName(record.fileName, in: record.directory, taken: taken, checkPartFiles: false)
-                try fm.moveItem(at: record.partURL, to: record.directory.appendingPathComponent(name))
-                record.fileName = name
-            } else {
-                let base = (record.fileName as NSString).deletingPathExtension
-                for (index, output) in outputs.enumerated() {
-                    let desired = index == 0 ? "\(base).\(output.pathExtension)" : "\(base) (audio).\(output.pathExtension)"
-                    let name = FileUtils.uniqueName(desired, in: record.directory, taken: taken, checkPartFiles: false)
-                    try fm.moveItem(at: output, to: record.directory.appendingPathComponent(name))
-                    if index == 0 { record.fileName = name }
+        item.record.status = .processing
+        finalizing.insert(item.id)
+        Task {
+            let saved = await Task.detached(priority: .userInitiated) {
+                Result { try Self.moveIntoPlace(record, outputs: outputs, taken: taken) }
+            }.value
+            finalizing.remove(item.id)
+            switch saved {
+            case .success(let file):
+                item.record.fileName = file.name
+                if let size = file.size {
+                    item.record.totalBytes = size
+                    item.record.receivedBytes = size
                 }
-                try? fm.removeItem(at: item.record.hlsWorkDirectory)
+                item.record.status = .completed
+                item.record.dateCompleted = Date()
+                item.record.segments = []
+                item.record.cookies = nil
+                item.parts = nil
+                Notifier.downloadFinished(item)
+            case .failure(let error):
+                item.record.status = .failed
+                item.record.lastError = "Couldn't save the file: \(error.localizedDescription)"
             }
-            FileUtils.markAsDownloaded(record.fileURL, from: record.url, referrer: record.referrer, agentName: "Nidestream")
-            if let size = (try? record.fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
-                record.totalBytes = Int64(size)
-                record.receivedBytes = Int64(size)
-            }
-            record.status = .completed
-            record.dateCompleted = Date()
-            record.segments = []
-            record.cookies = nil
-            item.record = record
-            item.parts = nil
-            Notifier.downloadFinished(item)
-        } catch {
-            item.record.status = .failed
-            item.record.lastError = "Couldn't save the file: \(error.localizedDescription)"
+            pump()
+            save()
         }
+    }
+
+    nonisolated private static func moveIntoPlace(_ record: DownloadRecord, outputs: [URL], taken: Set<String>) throws -> (name: String, size: Int64?) {
+        let fm = FileManager.default
+        var name = record.fileName
+        if outputs.isEmpty {
+            name = FileUtils.uniqueName(record.fileName, in: record.directory, taken: taken, checkPartFiles: false)
+            try fm.moveItem(at: record.partURL, to: record.directory.appendingPathComponent(name))
+        } else {
+            let base = (record.fileName as NSString).deletingPathExtension
+            for (index, output) in outputs.enumerated() {
+                let desired = index == 0 ? "\(base).\(output.pathExtension)" : "\(base) (audio).\(output.pathExtension)"
+                let unique = FileUtils.uniqueName(desired, in: record.directory, taken: taken, checkPartFiles: false)
+                try fm.moveItem(at: output, to: record.directory.appendingPathComponent(unique))
+                if index == 0 { name = unique }
+            }
+            try? fm.removeItem(at: record.hlsWorkDirectory)
+        }
+        let file = record.directory.appendingPathComponent(name)
+        FileUtils.markAsDownloaded(file, from: record.url, referrer: record.referrer, agentName: "Nidestream")
+        return (name, (try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize.map(Int64.init))
     }
 
     /// Keeps the Mac (optionally) awake and the app out of App Nap while anything downloads.
